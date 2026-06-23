@@ -119,7 +119,7 @@ class Superman:
         # Cape trail
         if math.hypot(self.vx, self.vy) > 0.5:
             self._trail.append((self.x, self.y, 0.0))
-        self._trail = [(tx, ty, ta + dt) for tx, ty, ta in self._trail if ta < 0.35]
+        self._trail = [(tx, ty, ta + dt) for tx, ty, ta in self._trail if ta + dt < 0.35]
 
     # ── Powers ────────────────────────────────────────────────────────────────
 
@@ -206,8 +206,9 @@ class Superman:
 
         # Cape trail
         for i, (tx, ty, ta) in enumerate(reversed(self._trail)):
-            alpha = int(210 * (1 - ta / 0.35))
-            tsz = max(2, int(8 * (1 - ta / 0.35)))
+            ratio = max(0.0, 1.0 - ta / 0.35)
+            alpha = int(210 * ratio)
+            tsz = max(2, int(8 * ratio))
             ts = pygame.Surface((tsz * 2 + 2, tsz * 2 + 2), pygame.SRCALPHA)
             pygame.draw.circle(ts, (*CAPE_RED, alpha), (tsz, tsz), tsz)
             surface.blit(ts, (int(tx - cam.x) - tsz, int(ty - cam.y) - tsz))
