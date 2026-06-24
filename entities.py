@@ -1,7 +1,10 @@
 import pygame
 import math
 import random
+import os
 from constants import *
+
+_SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites", "superman")
 
 
 def _rot(cx, cy, dx, dy, angle):
@@ -54,6 +57,20 @@ class Superman:
         self.alive = True
         self.heat_firing = False
         self.freeze_just_fired = False
+
+        # Sprites: flying (moving), hover (idle), death
+        self._sprite_fly   = Superman._load_sprite("superman flying.png",          (96, 44))
+        self._sprite_hover = Superman._load_sprite("superman standing flight.png", (44, 72))
+        self._sprite_death = Superman._load_sprite("super-death.png",              (110, 38))
+
+    @staticmethod
+    def _load_sprite(filename, size):
+        try:
+            path = os.path.join(_SPRITES_DIR, filename)
+            img = pygame.image.load(path).convert_alpha()
+            return pygame.transform.smoothscale(img, size)
+        except Exception:
+            return None
 
     @property
     def rect(self):
@@ -213,34 +230,54 @@ class Superman:
             pygame.draw.circle(ts, (*CAPE_RED, alpha), (tsz, tsz), tsz)
             surface.blit(ts, (int(tx - cam.x) - tsz, int(ty - cam.y) - tsz))
 
-        body_col = WHITE if self._hit_flash > 0 else BLUE_S
-        if self.krypto_debuff > 0:
-            body_col = (max(0, body_col[0] - 60), min(255, body_col[1] + 60), max(0, body_col[2] - 60))
+        # Choose sprite based on state
+        spd = math.hypot(self.vx, self.vy)
+        if not self.alive:
+            base = self._sprite_death
+        elif spd > 0.8:
+            base = self._sprite_fly
+        else:
+            base = self._sprite_hover
 
-        # Cape behind
-        cx1, cy1 = _rot(sx, sy, -12, -9, self.facing)
-        cx2, cy2 = _rot(sx, sy, -12, 9, self.facing)
-        cx3, cy3 = _rot(sx, sy, -26, 0, self.facing)
-        pygame.draw.polygon(surface, CAPE_RED, [(cx1, cy1), (cx2, cy2), (cx3, cy3)])
+        if base is not None:
+            # Flip horizontally when facing left, then rotate to match facing direction.
+            # Sprites face right by default (angle 0). Rotation uses screen-space convention
+            # where y increases downward, so clockwise = negative pygame angle.
+            flip_x = math.cos(self.facing) < 0
+            if flip_x:
+                draw_sprite = pygame.transform.flip(base, True, False)
+                # Mirror the angle across the y-axis so the flipped sprite tracks correctly
+                angle_deg = math.degrees(self.facing - math.copysign(math.pi, self.facing))
+            else:
+                draw_sprite = base
+                angle_deg = -math.degrees(self.facing)
 
-        # Body
-        body_pts = [_rot(sx, sy, *p, self.facing) for p in [(-10, -8), (12, -8), (14, -4), (14, 4), (12, 8), (-10, 8)]]
-        pygame.draw.polygon(surface, body_col, body_pts)
-        pygame.draw.polygon(surface, (max(0, body_col[0]-30), max(0, body_col[1]-30), max(0, body_col[2]-30)), body_pts, 2)
+            rotated = pygame.transform.rotate(draw_sprite, angle_deg)
+            rect = rotated.get_rect(center=(sx, sy))
 
-        # S shield
-        s_pts = [_rot(sx, sy, *p, self.facing) for p in [(2, -5), (8, 0), (2, 5), (-4, 0)]]
-        pygame.draw.polygon(surface, YELLOW_S, s_pts)
+            # Tint overlays (hit flash → white; kryptonite → green)
+            if self._hit_flash > 0:
+                tinted = rotated.copy()
+                tinted.fill((180, 180, 180, 0), special_flags=pygame.BLEND_RGB_ADD)
+                surface.blit(tinted, rect)
+            elif self.krypto_debuff > 0:
+                tinted = rotated.copy()
+                tinted.fill((0, 50, 0, 0), special_flags=pygame.BLEND_RGB_ADD)
+                surface.blit(tinted, rect)
+            else:
+                surface.blit(rotated, rect)
+        else:
+            # Fallback if sprites failed to load
+            pygame.draw.circle(surface, BLUE_S, (sx, sy), 16)
+            pygame.draw.circle(surface, YELLOW_S, (sx, sy), 6)
 
-        # Head
-        hx, hy = _rot(sx, sy, 16, 0, self.facing)
-        pygame.draw.circle(surface, FLESH, (int(hx), int(hy)), 6)
-        # Eyes (heat vision glow)
+        # Heat vision eye glow in facing direction
         if self.heat_firing:
-            ex, ey = _rot(sx, sy, 22, 0, self.facing)
-            gs = pygame.Surface((30, 30), pygame.SRCALPHA)
-            pygame.draw.circle(gs, (*FIRE_HOT, 180), (15, 15), 12)
-            surface.blit(gs, (int(ex) - 15, int(ey) - 15))
+            ex = sx + int(math.cos(self.facing) * 24)
+            ey = sy + int(math.sin(self.facing) * 24)
+            gs = pygame.Surface((32, 32), pygame.SRCALPHA)
+            pygame.draw.circle(gs, (*FIRE_HOT, 200), (16, 16), 14)
+            surface.blit(gs, (ex - 16, ey - 16))
 
         # Krypto aura
         if self.krypto_debuff > 0:
