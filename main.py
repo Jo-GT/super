@@ -299,10 +299,10 @@ class Game:
             if hasattr(ev, 'enemies'):
                 all_enemies.extend(ev.enemies)
 
-        # Heat Vision: Space or LMB
-        if keys[pygame.K_SPACE] or mouse_buttons[0]:
-            if s.can_use_heat_vision() if hasattr(s, 'can_use_heat_vision') else s.heat_cd <= 0:
-                s.try_heat_vision(all_enemies, self.pfs)
+        # Heat Vision: Space or LMB (held down for a continuous beam)
+        s.heat_firing = bool(keys[pygame.K_SPACE] or mouse_buttons[0])
+        if s.heat_firing and s.heat_cd <= 0:
+            s.try_heat_vision(all_enemies, self.pfs)
 
         # Freeze: F or RMB
         if (keys[pygame.K_f] or mouse_buttons[2]) and s.freeze_cd <= 0:
@@ -390,12 +390,14 @@ class Game:
         if self.superman.heat_firing:
             sx = int(self.superman.x - self.camera.x)
             sy = int(self.superman.y - self.camera.y)
-            mx, my = pygame.mouse.get_pos()
-            # Beam
+            ex = int(sx + math.cos(self.superman.facing) * Superman.HEAT_RANGE)
+            ey = int(sy + math.sin(self.superman.facing) * Superman.HEAT_RANGE)
+            # Beam (layered glow, drawn every frame the trigger is held for a solid long beam)
             beam_surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-            pygame.draw.line(beam_surf, (*FIRE_HOT, 220), (sx, sy), (mx, my), 4)
-            pygame.draw.line(beam_surf, (*FIRE_WARM, 140), (sx, sy), (mx, my), 8)
-            pygame.draw.line(beam_surf, (255, 255, 200, 80), (sx, sy), (mx, my), 12)
+            pygame.draw.line(beam_surf, (255, 255, 220, 90), (sx, sy), (ex, ey), 16)
+            pygame.draw.line(beam_surf, (*FIRE_WARM, 160), (sx, sy), (ex, ey), 9)
+            pygame.draw.line(beam_surf, (*FIRE_HOT, 230), (sx, sy), (ex, ey), 4)
+            pygame.draw.line(beam_surf, (255, 255, 255, 255), (sx, sy), (ex, ey), 2)
             screen.blit(beam_surf, (0, 0))
 
         # Freeze breath cone
