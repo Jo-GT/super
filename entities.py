@@ -28,7 +28,8 @@ class Superman:
     DRAG       = 0.80
     MAX_HP     = 100
     HEAT_CD    = 0.08
-    FREEZE_CD  = 3.5
+    FREEZE_CD  = 0.12
+    FREEZE_LOCK = 0.35
     PUNCH_CD   = 1.8
     SPEED_CD   = 14.0
     SPEED_DUR  = 4.0
@@ -37,6 +38,11 @@ class Superman:
     FREEZE_RANGE = 180
     PUNCH_DMG   = 55
     HEAT_DPS    = 22
+
+    # Local head offset (from sprite center, unrotated/unflipped) for each pose,
+    # measured from the actual sprite art so heat vision always exits the head.
+    HEAD_OFFSET_FLY   = (32, -12)
+    HEAD_OFFSET_HOVER = (4, -23)
 
     def __init__(self, x, y):
         self.x, self.y = float(x), float(y)
@@ -56,7 +62,8 @@ class Superman:
         self.reputation = 50
         self.alive = True
         self.heat_firing = False
-        self.freeze_just_fired = False
+        self.freeze_active = False
+        self.head_pos = (self.x, self.y)
 
         # Sprites: flying (moving), hover (idle), death
         self._sprite_fly   = Superman._load_sprite("superman flying.png",          (96, 44))
@@ -93,7 +100,6 @@ class Superman:
         self.speed_cd    = max(0, self.speed_cd  - dt)
         self._hit_flash  = max(0, self._hit_flash - dt)
         self.krypto_debuff = max(0, self.krypto_debuff - dt)
-        self.freeze_just_fired = False
 
         if self.speed_remaining > 0:
             self.speed_remaining -= dt
@@ -146,9 +152,10 @@ class Superman:
         if self.heat_cd > 0:
             return
         self.heat_cd = self.HEAT_CD
-        tx = self.x + math.cos(self.facing) * self.HEAT_RANGE
-        ty = self.y + math.sin(self.facing) * self.HEAT_RANGE
-        particles.heat_beam(self.x, self.y, tx, ty)
+        hx, hy = self.head_pos
+        tx = hx + math.cos(self.facing) * self.HEAT_RANGE
+        ty = hy + math.sin(self.facing) * self.HEAT_RANGE
+        particles.heat_beam(hx, hy, tx, ty)
         for e in enemies:
             if self._in_beam(e.x, e.y, tx, ty, 28):
                 e.take_damage(self.HEAT_DPS * self.HEAT_CD)
@@ -157,17 +164,17 @@ class Superman:
         if self.freeze_cd > 0:
             return False
         self.freeze_cd = self.FREEZE_CD
-        self.freeze_just_fired = True
-        particles.freeze_burst(self.x, self.y, self.facing)
+        hx, hy = self.head_pos
+        particles.frost_breath(hx, hy, self.facing, self.FREEZE_RANGE)
         for e in enemies:
-            dx = e.x - self.x
-            dy = e.y - self.y
+            dx = e.x - hx
+            dy = e.y - hy
             d = math.hypot(dx, dy)
             if d < self.FREEZE_RANGE:
                 a = math.atan2(dy, dx)
                 diff = abs((a - self.facing + math.pi) % (2 * math.pi) - math.pi)
                 if diff < 0.75:
-                    e.freeze(3.0)
+                    e.freeze(self.FREEZE_LOCK)
         return True
 
     def try_punch(self, enemies, particles):
@@ -195,7 +202,7 @@ class Superman:
         self.speed_cd = self.SPEED_CD
 
     def _in_beam(self, px, py, tx, ty, threshold=28):
-        ax, ay = self.x, self.y
+        ax, ay = self.head_pos
         bx, by = tx, ty
         dx, dy = bx - ax, by - ay
         lsq = dx * dx + dy * dy
@@ -207,7 +214,8 @@ class Superman:
         return math.hypot(px - closest_x, py - closest_y) < threshold
 
     def freeze_covers(self, wx, wy):
-        dx, dy = wx - self.x, wy - self.y
+        hx, hy = self.head_pos
+        dx, dy = wx - hx, wy - hy
         d = math.hypot(dx, dy)
         if d > self.FREEZE_RANGE:
             return False
@@ -236,6 +244,17 @@ class Superman:
             base = self._sprite_fly
         else:
             base = self._sprite_hover
+
+        # Head position in world space: rotate the pose's local head offset by facing,
+        # mirroring the same flip-then-rotate the sprite itself goes through below so
+        # effects (heat vision) track the actual rendered head, not the body center.
+        hdx, hdy = self.HEAD_OFFSET_HOVER if base is self._sprite_hover else self.HEAD_OFFSET_FLY
+        c, s = math.cos(self.facing), math.sin(self.facing)
+        hpx = hdx * c - hdy * s
+        hpy = hdx * s + hdy * c
+        if c < 0:
+            hpy = -hpy
+        self.head_pos = (self.x + hpx, self.y + hpy)
 
         if base is not None:
             # Flip horizontally when facing left, then rotate to match facing direction.
@@ -269,10 +288,10 @@ class Superman:
             pygame.draw.circle(surface, BLUE_S, (sx, sy), 16)
             pygame.draw.circle(surface, YELLOW_S, (sx, sy), 6)
 
-        # Heat vision eye glow in facing direction
+        # Heat vision eye glow, anchored to the head
         if self.heat_firing:
-            ex = sx + int(math.cos(self.facing) * 24)
-            ey = sy + int(math.sin(self.facing) * 24)
+            ex = int(self.head_pos[0] - cam.x)
+            ey = int(self.head_pos[1] - cam.y)
             gs = pygame.Surface((32, 32), pygame.SRCALPHA)
             pygame.draw.circle(gs, (*FIRE_HOT, 200), (16, 16), 14)
             surface.blit(gs, (ex - 16, ey - 16))

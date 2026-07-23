@@ -73,12 +73,16 @@ class ParticleSystem:
                                math.cos(angle) * spd, math.sin(angle) * spd,
                                c, random.uniform(0.3, 0.8), random.randint(4, 8)))
 
-    def freeze_burst(self, x, y, angle, arc=0.8, count=18, reach=120):
+    def frost_breath(self, x, y, angle, reach=180, half_angle=0.55, count=10):
         for _ in range(count):
-            a = angle + random.uniform(-arc, arc)
-            spd = random.uniform(1.5, reach / 40)
-            self.add(Particle(x, y, math.cos(a) * spd, math.sin(a) * spd,
-                               ICE, random.uniform(0.4, 0.7), random.randint(3, 7)))
+            a = angle + random.uniform(-half_angle, half_angle)
+            dist = random.uniform(0.15, 1.0) * reach
+            bx = x + math.cos(a) * dist
+            by = y + math.sin(a) * dist
+            spd = random.uniform(0.4, 1.3)
+            color = ICE if random.random() > 0.35 else (200, 240, 255)
+            self.add(Particle(bx, by, math.cos(a) * spd, math.sin(a) * spd,
+                               color, random.uniform(0.3, 0.5), random.randint(3, 7)))
 
     def heat_beam(self, x1, y1, x2, y2, count=8):
         dx, dy = x2 - x1, y2 - y1
