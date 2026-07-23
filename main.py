@@ -304,10 +304,10 @@ class Game:
         if s.heat_firing and s.heat_cd <= 0:
             s.try_heat_vision(all_enemies, self.pfs)
 
-        # Freeze: F or RMB
-        if (keys[pygame.K_f] or mouse_buttons[2]) and s.freeze_cd <= 0:
+        # Freeze Breath: F or RMB (held for a continuous frost cone)
+        s.freeze_active = bool(keys[pygame.K_f] or mouse_buttons[2])
+        if s.freeze_active and s.freeze_cd <= 0:
             s.try_freeze(all_enemies, self.pfs)
-            self.flash.trigger(ICE, 40)
 
         # Punch: Q
         if keys[pygame.K_q] and s.punch_cd <= 0:
@@ -386,10 +386,10 @@ class Game:
         # Superman
         self.superman.draw(screen, self.camera)
 
-        # Heat vision beam
+        # Heat vision beam (always exits the head, wherever the current pose puts it)
         if self.superman.heat_firing:
-            sx = int(self.superman.x - self.camera.x)
-            sy = int(self.superman.y - self.camera.y)
+            sx = int(self.superman.head_pos[0] - self.camera.x)
+            sy = int(self.superman.head_pos[1] - self.camera.y)
             ex = int(sx + math.cos(self.superman.facing) * Superman.HEAT_RANGE)
             ey = int(sy + math.sin(self.superman.facing) * Superman.HEAT_RANGE)
             # Beam (layered glow, drawn every frame the trigger is held for a solid long beam)
@@ -400,10 +400,10 @@ class Game:
             pygame.draw.line(beam_surf, (255, 255, 255, 255), (sx, sy), (ex, ey), 2)
             screen.blit(beam_surf, (0, 0))
 
-        # Freeze breath cone
-        if self.superman.freeze_just_fired:
-            fx = int(self.superman.x - self.camera.x)
-            fy = int(self.superman.y - self.camera.y)
+        # Freeze breath cone (drawn continuously while held, exits the head)
+        if self.superman.freeze_active:
+            fx = int(self.superman.head_pos[0] - self.camera.x)
+            fy = int(self.superman.head_pos[1] - self.camera.y)
             angle = self.superman.facing
             cone_surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
             pts = [(fx, fy)]

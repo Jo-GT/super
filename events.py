@@ -160,6 +160,7 @@ class HostageEvent(BaseEvent):
 class FireEvent(BaseEvent):
     INNER_RADIUS = 200
     TIMER = 55.0
+    DOUSE_RATE = 0.4  # flame_hp per second of sustained, aimed freeze breath
 
     def __init__(self, x, y):
         super().__init__(x, y, EventType.RESCUE_FIRE)
@@ -196,12 +197,13 @@ class FireEvent(BaseEvent):
             fi = random.choice([i for i, fh in enumerate(self.flame_hp) if fh > 0])
             particles.fire_burst(self.flames[fi][0], self.flames[fi][1], count=4)
 
-        # Freeze breath douses flames
-        if superman.freeze_just_fired:
+        # Freeze breath douses flames (continuous while aimed at them)
+        if superman.freeze_active:
             for i, (fx, fy) in enumerate(self.flames):
                 if self.flame_hp[i] > 0 and superman.freeze_covers(fx, fy):
-                    self.flame_hp[i] = max(0, self.flame_hp[i] - 0.5)
-                    particles.burst(fx, fy, ICE, count=8, speed=2)
+                    self.flame_hp[i] = max(0, self.flame_hp[i] - self.DOUSE_RATE * dt)
+                    if random.random() < 0.3:
+                        particles.burst(fx, fy, ICE, count=3, speed=2)
 
         # Rescue citizens only after at least half flames out
         doused = sum(1 for fh in self.flame_hp if fh <= 0)
@@ -461,16 +463,13 @@ class FloodEvent(BaseEvent):
         if not self.active:
             return
 
-        # Water rises
+        # Water rises (freeze breath held near animals slows the flood)
         freeze_factor = 0.2 if any(
-            math.hypot(superman.x - a.x, superman.y - a.y) < 300 and superman.freeze_just_fired
+            math.hypot(superman.x - a.x, superman.y - a.y) < 300 and superman.freeze_active
             for a in self.animals
         ) else 1.0
         self.water_level += 0.08 * freeze_factor * dt
         self.timer -= dt
-
-        if superman.freeze_just_fired:
-            particles.freeze_burst(superman.x, superman.y, superman.facing, count=20, reach=200)
 
         for a in self.animals:
             a.update(dt, superman)
