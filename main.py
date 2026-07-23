@@ -13,7 +13,7 @@ Controls:
 import pygame
 import math
 import random
-import sys
+import asyncio
 
 from constants import *
 from city import City
@@ -331,7 +331,7 @@ class Game:
         self.flash.update(dt)
 
         # Notifications
-        self._notifications = [[t, c, ti - dt] for t, c, ti in self._notifications if ti > 0]
+        self._notifications = [[t, c, ti - dt] for t, c, ti in self._notifications if ti - dt > 0]
 
         # Events
         for ev in self.events:
@@ -428,28 +428,6 @@ class Game:
             y = SCREEN_H // 2 - 60 - i * 32
             draw_text(screen, text, font_large, (*color[:3], alpha), SCREEN_W // 2, y, center=True)
 
-    def run(self):
-        running = True
-        while running:
-            dt = clock.tick(FPS) / 1000.0
-            dt = min(dt, 0.05)
-
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit(); sys.exit()
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        return 'menu'
-
-            if not self.superman.alive:
-                return 'dead'
-
-            self.update(dt)
-            self.draw()
-            pygame.display.flip()
-
-        return 'menu'
-
     def can_use_heat_vision(self):
         return self.superman.heat_cd <= 0
 
@@ -518,35 +496,44 @@ def draw_game_over(score, reputation):
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
-def main():
+async def main():
     state = 'menu'
     game: Game | None = None
 
     while True:
+        dt = clock.tick(FPS) / 1000.0
+        dt = min(dt, 0.05)
+
+        events = pygame.event.get()
+        for event in events:
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
         if state == 'menu':
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit(); sys.exit()
+            for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
                         game = Game()
                         state = 'play'
                     if event.key == pygame.K_ESCAPE:
-                        pygame.quit(); sys.exit()
+                        pygame.quit()
+                        return
             draw_menu()
-            clock.tick(FPS)
 
         elif state == 'play':
-            result = game.run()
-            if result == 'dead':
+            escape = any(e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE for e in events)
+            if escape:
+                state = 'menu'
+            elif not game.superman.alive:
                 state = 'gameover'
             else:
-                state = 'menu'
+                game.update(dt)
+                game.draw()
+                pygame.display.flip()
 
         elif state == 'gameover':
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    pygame.quit(); sys.exit()
+            for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
                         game = Game()
@@ -554,8 +541,9 @@ def main():
                     if event.key == pygame.K_ESCAPE:
                         state = 'menu'
             draw_game_over(game.superman.score, game.superman.reputation)
-            clock.tick(FPS)
+
+        await asyncio.sleep(0)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
