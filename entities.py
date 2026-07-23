@@ -93,7 +93,6 @@ class Superman:
         self.speed_cd    = max(0, self.speed_cd  - dt)
         self._hit_flash  = max(0, self._hit_flash - dt)
         self.krypto_debuff = max(0, self.krypto_debuff - dt)
-        self.heat_firing = False
         self.freeze_just_fired = False
 
         if self.speed_remaining > 0:
@@ -147,7 +146,6 @@ class Superman:
         if self.heat_cd > 0:
             return
         self.heat_cd = self.HEAT_CD
-        self.heat_firing = True
         tx = self.x + math.cos(self.facing) * self.HEAT_RANGE
         ty = self.y + math.sin(self.facing) * self.HEAT_RANGE
         particles.heat_beam(self.x, self.y, tx, ty)
