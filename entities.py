@@ -76,8 +76,8 @@ class Superman:
     def rect(self):
         return pygame.Rect(int(self.x) - 14, int(self.y) - 14, 28, 28)
 
-    def take_damage(self, amount):
-        if self.krypto_debuff > 0:
+    def take_damage(self, amount, krypto_mult=True):
+        if krypto_mult and self.krypto_debuff > 0:
             amount *= 1.6
         self.hp = max(0, self.hp - amount)
         self._regen_pause = 2.5
@@ -346,7 +346,8 @@ class Enemy:
     def try_attack(self, superman, dt):
         d = math.hypot(superman.x - self.x, superman.y - self.y)
         if d < 35 and self.attack_cd <= 0:
-            superman.take_damage(self.DMG)
+            if self.DMG > 0:
+                superman.take_damage(self.DMG)
             self.attack_cd = 1.0
 
     def _draw_base(self, surface, cam, color=None):
@@ -367,7 +368,7 @@ class Enemy:
 
 
 class Thug(Enemy):
-    HP = 35; SPEED = 1.8; DMG = 7.0; COLOR = (80, 80, 80); RADIUS = 14
+    HP = 35; SPEED = 1.8; DMG = 0.0; COLOR = (80, 80, 80); RADIUS = 14
 
     def update(self, dt, superman, particles):
         self._base_update(dt)
@@ -387,7 +388,7 @@ class Thug(Enemy):
 
 
 class Robot(Enemy):
-    HP = 55; SPEED = 1.2; DMG = 10.0; COLOR = SILVER; RADIUS = 16
+    HP = 55; SPEED = 1.2; DMG = 4.0; COLOR = SILVER; RADIUS = 16
     SHOT_CD = 2.2; SHOT_SPEED = 4.5
 
     def __init__(self, x, y):
@@ -424,7 +425,7 @@ class Robot(Enemy):
         for proj in self.projectiles:
             proj.update(dt)
             if proj.hits_superman(superman):
-                superman.take_damage(10)
+                superman.take_damage(self.DMG)
                 particles.burst(superman.x, superman.y, RED, 6, 2)
                 proj.dead = True
         self.projectiles = [p for p in self.projectiles if not p.dead]
@@ -512,7 +513,7 @@ class BrainiacDrone(Enemy):
 
 class Metallo(Enemy):
     HP = 220; SPEED = 0.9; DMG = 18.0; COLOR = (85, 90, 95); RADIUS = 26
-    KRYPTO_RADIUS = 160; KRYPTO_DPS = 12.0; SHOT_CD = 2.5; SHOT_SPEED = 3.5
+    KRYPTO_RADIUS = 160; KRYPTO_DPS = 18.0; SHOT_CD = 2.5; SHOT_SPEED = 3.5
 
     def __init__(self, x, y):
         super().__init__(x, y)
@@ -531,10 +532,12 @@ class Metallo(Enemy):
         self._move_toward(superman.x, superman.y, dt, spd_m)
         self._angle = math.atan2(dy, dx)
 
-        # Kryptonite aura damage
+        # Kryptonite aura damage (own tick skips the krypto_debuff multiplier it just
+        # set, so it doesn't compound with itself every frame; other sources still
+        # get the 1.6x bonus while Superman is debuffed)
         if d < self.KRYPTO_RADIUS:
             superman.krypto_debuff = 0.5
-            superman.take_damage(self.KRYPTO_DPS * dt)
+            superman.take_damage(self.KRYPTO_DPS * dt, krypto_mult=False)
 
         if self.shot_cd <= 0 and d < 500:
             self.shot_cd = self.SHOT_CD
