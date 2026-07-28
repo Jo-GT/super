@@ -359,8 +359,8 @@ class MenuVideo:
 # ─── GAME ─────────────────────────────────────────────────────────────────────
 
 class Game:
-    MAX_EVENTS   = 5
-    SPAWN_TIMER  = 18.0
+    MAX_EVENTS   = 7
+    SPAWN_TIMER  = 9.0
     MIN_SPAWN_D  = 500
 
     def __init__(self):
@@ -374,7 +374,7 @@ class Game:
         self.events: list[BaseEvent] = []
         self.hud    = HUD()
         self.flash  = ScreenFlash()
-        self._spawn_cd = 5.0
+        self._spawn_cd = 3.0
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
         self._wind_playing = False

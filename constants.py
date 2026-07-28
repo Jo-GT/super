@@ -3,8 +3,8 @@ from enum import Enum, auto
 SCREEN_W, SCREEN_H = 1280, 720
 FPS    = 60
 TITLE  = "Superman: Guardian of Metropolis"
-WORLD_W = 3072
-WORLD_H = 3072
+WORLD_W = 4608
+WORLD_H = 4608
 
 SKY       = (65, 110, 185)
 ROAD      = (36, 38, 44)
