@@ -40,6 +40,11 @@ Open that URL in a browser to play. The first run takes longer since it download
 the WebAssembly Python runtime; later runs are faster. If you change the code,
 stop and re-run the `pygbag` command to rebuild — it does not hot-reload.
 
+## Live deployment
+
+Every push to `main` is built with pygbag and published to GitHub Pages by
+`.github/workflows/deploy-pages.yml` — no manual build/copy step needed.
+
 ## Controls
 
 | Key                | Action                          |
