@@ -375,7 +375,7 @@ class Game:
         self.events: list[BaseEvent] = []
         self.hud    = HUD()
         self.flash  = ScreenFlash()
-        self.dialogue = DialogueManager(font_small)
+        self.dialogue = DialogueManager()
         self._spawn_cd = 3.0
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
