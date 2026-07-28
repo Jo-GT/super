@@ -62,6 +62,9 @@ def _load_sound(filename):
 
 snd_wind   = _load_sound("flying wind noise.mp3")
 snd_sprint = _load_sound("beginsprint.mp3")
+snd_heat   = _load_sound("heatvision.mp3")
+snd_freeze = _load_sound("freeze breath.mp3")
+snd_punch  = _load_sound("punch.mp3")
 
 try:
     pygame.mixer.music.load(os.path.join(_SOUNDS_DIR, "mainmenutheme.mp3"))
@@ -359,6 +362,8 @@ class Game:
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
         self._wind_playing = False
+        self._heat_playing = False
+        self._freeze_playing = False
 
         # Spawn initial events
         for _ in range(3):
@@ -394,16 +399,32 @@ class Game:
         s.heat_firing = bool(keys[pygame.K_SPACE] or mouse_buttons[0])
         if s.heat_firing and s.heat_cd <= 0:
             s.try_heat_vision(all_enemies, self.pfs)
+        if snd_heat:
+            if s.heat_firing and not self._heat_playing:
+                snd_heat.play(loops=-1)
+                self._heat_playing = True
+            elif not s.heat_firing and self._heat_playing:
+                snd_heat.stop()
+                self._heat_playing = False
 
         # Freeze Breath: F or RMB (held for a continuous frost cone)
         s.freeze_active = bool(keys[pygame.K_f] or mouse_buttons[2])
         if s.freeze_active and s.freeze_cd <= 0:
             s.try_freeze(all_enemies, self.pfs)
+        if snd_freeze:
+            if s.freeze_active and not self._freeze_playing:
+                snd_freeze.play(loops=-1)
+                self._freeze_playing = True
+            elif not s.freeze_active and self._freeze_playing:
+                snd_freeze.stop()
+                self._freeze_playing = False
 
         # Punch: Q
         if keys[pygame.K_q] and s.punch_cd <= 0:
-            s.try_punch(all_enemies, self.pfs)
-            self.flash.trigger(YELLOW_S, 60)
+            if s.try_punch(all_enemies, self.pfs):
+                self.flash.trigger(YELLOW_S, 60)
+                if snd_punch:
+                    snd_punch.play()
 
         # Speed: Shift
         if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
@@ -415,7 +436,13 @@ class Game:
     def stop_sounds(self):
         if snd_wind:
             snd_wind.stop()
+        if snd_heat:
+            snd_heat.stop()
+        if snd_freeze:
+            snd_freeze.stop()
         self._wind_playing = False
+        self._heat_playing = False
+        self._freeze_playing = False
 
     def update(self, dt):
         s = self.superman

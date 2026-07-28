@@ -179,7 +179,7 @@ class Superman:
 
     def try_punch(self, enemies, particles):
         if self.punch_cd > 0:
-            return
+            return False
         nearest = None
         best_d = self.PUNCH_RANGE
         for e in enemies:
@@ -187,13 +187,14 @@ class Superman:
             if d < best_d:
                 best_d = d; nearest = e
         if nearest is None:
-            return
+            return False
         self.punch_cd = self.PUNCH_CD
         self.x, self.y = nearest.x, nearest.y
         particles.shockwave(self.x, self.y)
         for e in enemies:
             if math.hypot(e.x - self.x, e.y - self.y) < 90:
                 e.take_damage(self.PUNCH_DMG)
+        return True
 
     def try_speed(self):
         if self.speed_cd > 0 or self.speed_remaining > 0:
