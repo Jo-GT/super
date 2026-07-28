@@ -16,7 +16,7 @@ pip install -r requirements.txt
 ## Run on desktop
 
 ```
-python main.py
+python main.py or py main.py
 ```
 
 This opens a native window and runs the game directly.
