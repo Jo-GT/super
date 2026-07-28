@@ -5,6 +5,16 @@ import os
 from constants import *
 
 _SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites", "superman")
+_LEXCORP_SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites", "lexcorp")
+
+
+def _load_lex_sprite(filename, size):
+    try:
+        path = os.path.join(_LEXCORP_SPRITES_DIR, filename)
+        img = pygame.image.load(path).convert_alpha()
+        return pygame.transform.smoothscale(img, size)
+    except Exception:
+        return None
 
 
 def _rot(cx, cy, dx, dy, angle):
@@ -408,6 +418,36 @@ class Thug(Enemy):
         pygame.draw.circle(surface, (60, 60, 60), (sx, sy), 6)
 
 
+class LexGoon(Thug):
+    """Thug reskinned with the LexCorp goon sprite; stats/AI unchanged from
+    Thug, falls back to Thug's procedural look if the sprite fails to load."""
+    _SPRITE_SIZE = (40, 75)
+    _sprite = None
+
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        if LexGoon._sprite is None:
+            LexGoon._sprite = _load_lex_sprite("lex_goon.png", self._SPRITE_SIZE) or False
+
+    def draw(self, surface, cam):
+        sprite = LexGoon._sprite
+        if not sprite:
+            super().draw(surface, cam)
+            return
+        sx = int(self.x - cam.x)
+        sy = int(self.y - cam.y)
+        img = sprite
+        if self._hit_flash > 0:
+            img = sprite.copy()
+            img.fill((180, 180, 180, 0), special_flags=pygame.BLEND_RGB_ADD)
+        elif self.frozen > 0:
+            img = sprite.copy()
+            img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
+        rect = img.get_rect(center=(sx, sy))
+        surface.blit(img, rect)
+        draw_health_bar(surface, sx, rect.top - 8, self.hp, self.max_hp, self.RADIUS * 2)
+
+
 class Robot(Enemy):
     HP = 55; SPEED = 1.2; DMG = 4.0; COLOR = SILVER; RADIUS = 16
     SHOT_CD = 2.2; SHOT_SPEED = 4.5
@@ -595,6 +635,91 @@ class Metallo(Enemy):
         surface.blit(ks2, (sx - kr - 4, sy - kr - 4))
 
         draw_health_bar(surface, sx, sy - 38, self.hp, self.max_hp, 52)
+        for proj in self.projectiles:
+            proj.draw(surface, cam)
+
+
+class LexMechSuit(Enemy):
+    """Highest-tier boss: Lex Luthor piloting a mech suit. Modeled on Metallo's
+    template (HP/timers/projectiles/pulsing core/bigger health bar) but trades
+    Metallo's passive kryptonite-aura DoT for an active missile-barrage +
+    melee-stomp pattern, since this isn't a kryptonite-powered enemy."""
+    HP = 320; SPEED = 0.85; DMG = 24.0; COLOR = (170, 40, 40); RADIUS = 30
+    BARRAGE_CD = 4.0; SHOT_SPEED = 4.0
+    STOMP_RANGE = 90; STOMP_CD = 3.0
+
+    _SPRITE_SIZE = (150, 158)
+    _sprite = None
+
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        if LexMechSuit._sprite is None:
+            LexMechSuit._sprite = _load_lex_sprite("lex_mechsuit.png", self._SPRITE_SIZE) or False
+        self.barrage_cd = 1.5
+        self.stomp_cd = self.STOMP_CD
+        self.projectiles: list[Projectile] = []
+        self._t = 0.0
+
+    def update(self, dt, superman, particles):
+        self._base_update(dt)
+        self._t += dt
+        self.barrage_cd = max(0, self.barrage_cd - dt)
+        self.stomp_cd = max(0, self.stomp_cd - dt)
+        spd_m = 0.25 if self.frozen > 0 else 1.0
+
+        dx = superman.x - self.x; dy = superman.y - self.y
+        d = math.hypot(dx, dy)
+        self._move_toward(superman.x, superman.y, dt, spd_m)
+        self._angle = math.atan2(dy, dx)
+
+        if self.barrage_cd <= 0 and d < 520:
+            self.barrage_cd = self.BARRAGE_CD
+            for offset in (-0.2, 0.0, 0.2):
+                a = self._angle + offset
+                self.projectiles.append(Projectile(self.x, self.y, a, self.SHOT_SPEED, RED, 9, 2.2))
+
+        if d < self.STOMP_RANGE and self.stomp_cd <= 0:
+            self.stomp_cd = self.STOMP_CD
+            superman.take_damage(self.DMG)
+            particles.shockwave(self.x, self.y)
+
+        for proj in self.projectiles:
+            proj.update(dt)
+            if proj.hits_superman(superman):
+                superman.take_damage(16)
+                proj.dead = True
+        self.projectiles = [p for p in self.projectiles if not p.dead]
+
+    def draw(self, surface, cam):
+        sx = int(self.x - cam.x); sy = int(self.y - cam.y)
+        sprite = LexMechSuit._sprite
+
+        pr = int(self.RADIUS + 10 + 6 * math.sin(self._t * 2))
+        gs = pygame.Surface((pr * 2, pr * 2), pygame.SRCALPHA)
+        alpha = int(30 + 20 * abs(math.sin(self._t * 2)))
+        pygame.draw.circle(gs, (*RED, alpha), (pr, pr), pr)
+        surface.blit(gs, (sx - pr, sy - pr))
+
+        if sprite:
+            img = sprite
+            if self._hit_flash > 0:
+                img = sprite.copy(); img.fill((180, 180, 180, 0), special_flags=pygame.BLEND_RGB_ADD)
+            elif self.frozen > 0:
+                img = sprite.copy(); img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
+            flip = math.cos(self._angle) < 0
+            draw_img = pygame.transform.flip(img, True, False) if flip else img
+            rect = draw_img.get_rect(center=(sx, sy))
+            surface.blit(draw_img, rect)
+        else:
+            c = WHITE if self._hit_flash > 0 else (ICE if self.frozen > 0 else self.COLOR)
+            pts = [_rot(sx, sy, *p, self._angle) for p in [(-26, -16), (26, -16), (28, -8), (28, 8), (26, 16), (-26, 16)]]
+            pygame.draw.polygon(surface, c, pts)
+            pygame.draw.polygon(surface, DARK_GRAY, pts, 3)
+
+        kr = int(9 + 4 * abs(math.sin(self._t * 3)))
+        pygame.draw.circle(surface, (255, 60, 40), (sx, sy), kr)
+
+        draw_health_bar(surface, sx, sy - 50, self.hp, self.max_hp, 60)
         for proj in self.projectiles:
             proj.draw(surface, cam)
 

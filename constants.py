@@ -57,6 +57,8 @@ class EventType(Enum):
     RESCUE_HOSTAGE  = auto()
     ANIMAL_CAT      = auto()
     ANIMAL_FLOOD    = auto()
+    FIGHT_LEX_GOONS    = auto()
+    FIGHT_LEX_MECHSUIT = auto()
 
 EVENT_CAT = {
     EventType.FIGHT_CRIMINALS: 'fight',
@@ -69,6 +71,8 @@ EVENT_CAT = {
     EventType.RESCUE_HOSTAGE:  'rescue',
     EventType.ANIMAL_CAT:      'animal',
     EventType.ANIMAL_FLOOD:    'animal',
+    EventType.FIGHT_LEX_GOONS:    'fight',
+    EventType.FIGHT_LEX_MECHSUIT: 'fight',
 }
 
 EVENT_NAMES = {
@@ -82,6 +86,8 @@ EVENT_NAMES = {
     EventType.RESCUE_HOSTAGE:  "Hostage Situation",
     EventType.ANIMAL_CAT:      "Cat Stuck in Tree",
     EventType.ANIMAL_FLOOD:    "Flooded Animal Shelter",
+    EventType.FIGHT_LEX_GOONS:    "Lex Goons Incoming!",
+    EventType.FIGHT_LEX_MECHSUIT: "!! LEX MECH SUIT ONLINE !!",
 }
 
 EVENT_HINTS = {
@@ -95,6 +101,8 @@ EVENT_HINTS = {
     EventType.RESCUE_HOSTAGE:  "Defeat the criminals - don't hit the hostage!",
     EventType.ANIMAL_CAT:      "Fly to the tree to rescue the cat!",
     EventType.ANIMAL_FLOOD:    "F=Freeze the water and rescue all animals!",
+    EventType.FIGHT_LEX_GOONS:    "SPACE=Heat Vision  F=Freeze  Q=Punch",
+    EventType.FIGHT_LEX_MECHSUIT: "Dodge the missile barrage! Use Q=Punch!",
 }
 
 CAT_COLORS = {
@@ -114,4 +122,33 @@ SCORE_TABLE = {
     EventType.RESCUE_HOSTAGE:  900,
     EventType.ANIMAL_CAT:      300,
     EventType.ANIMAL_FLOOD:    700,
+    EventType.FIGHT_LEX_GOONS:    650,
+    EventType.FIGHT_LEX_MECHSUIT: 3200,
+}
+
+LEX_EVENT_TYPES = {
+    EventType.FIGHT_ROBOTS,
+    EventType.FIGHT_LEX_GOONS,
+    EventType.FIGHT_LEX_MECHSUIT,
+}
+
+LEX_INTRO_LINES = {
+    EventType.FIGHT_ROBOTS:       "Rise, my LexCorp sentries. Bring me a souvenir from that alien's cape.",
+    EventType.FIGHT_LEX_GOONS:    "Boys, our resident alien nuisance is nearby. Remind him whose city this is.",
+    EventType.FIGHT_LEX_MECHSUIT: "Enough delegating. Time I settled this myself... suit up!",
+}
+LEX_DEFEAT_LINES = {
+    EventType.FIGHT_ROBOTS:       "Scrap metal. I'll bill R&D for sturdier sentries.",
+    EventType.FIGHT_LEX_GOONS:    "Overtime pay revoked for the lot of you. Useless.",
+    EventType.FIGHT_LEX_MECHSUIT: "This isn't over, Su... I mean -- Superman. Enjoy this small victory.",
+}
+SUPERMAN_INTRO_LINES = {
+    EventType.FIGHT_ROBOTS:       "Another one of your toys, Luthor? Metropolis isn't your test lab.",
+    EventType.FIGHT_LEX_GOONS:    "Paying goons again, Lex? At least give them dental.",
+    EventType.FIGHT_LEX_MECHSUIT: "A mech suit? Bold move for a man allergic to a fair fight.",
+}
+SUPERMAN_DEFEAT_LINES = {
+    EventType.FIGHT_ROBOTS:       "Back to the scrapyard, where LexCorp's ideas belong.",
+    EventType.FIGHT_LEX_GOONS:    "Tell your boss Metropolis says hello.",
+    EventType.FIGHT_LEX_MECHSUIT: "Suit's down, Lex. Try origami next time -- less collateral damage.",
 }
