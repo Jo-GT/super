@@ -1,18 +1,13 @@
-name: Deploy web build to GitHub Pages
+name: Build web version into docs/
 
 on:
   push:
     branches: [main]
+    paths-ignore: [docs/**]
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
+  contents: write
 
 jobs:
   build:
@@ -30,19 +25,14 @@ jobs:
       - name: Build WebAssembly bundle
         run: python -m pygbag --build main.py
 
-      - name: Keep custom domain
-        run: echo "supermangotm.org" > build/web/CNAME
+      - name: Publish build output into docs/
+        run: |
+          rm -rf docs
+          mkdir docs
+          cp -r build/web/. docs/
+          echo "supermangotm.org" > docs/CNAME
 
-      - uses: actions/upload-pages-artifact@v3
+      - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          path: build/web
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          commit_message: "Rebuild web version (automated)"
+          file_pattern: docs/**
