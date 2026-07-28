@@ -30,7 +30,6 @@ jobs:
           rm -rf docs
           mkdir docs
           cp -r build/web/. docs/
-          echo "supermangotm.org" > docs/CNAME
 
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
