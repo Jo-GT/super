@@ -14,12 +14,21 @@ import pygame
 import math
 import random
 import asyncio
+import os
 
 from constants import *
 from city import City
 from particles import ParticleSystem
 from entities import Superman
 from events import BaseEvent, spawn_random_event
+
+try:
+    import cv2
+    _HAS_CV2 = True
+except Exception:
+    _HAS_CV2 = False
+
+_TITLE_VIDEO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Title Page", "Superman Title.mp4")
 
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
@@ -247,6 +256,56 @@ class ScreenFlash:
             surface.blit(self._surf, (0, 0))
 
 
+# ─── TITLE VIDEO ──────────────────────────────────────────────────────────────
+
+class MenuVideo:
+    """Decodes the title mp4 frame-by-frame and plays it once, holding on the
+    last frame (the video's own "PRESS START" card) rather than looping the
+    reveal. Falls back to no-op if opencv or the file isn't available, so the
+    menu still works without the extra dependency."""
+
+    def __init__(self, path):
+        self.surface = None
+        self._cap = None
+        self._t = 0.0
+        self._frame_dt = 1 / 30.0
+        self._done = False
+        if not _HAS_CV2:
+            return
+        cap = cv2.VideoCapture(path)
+        if cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            self._frame_dt = 1.0 / fps
+            self._cap = cap
+            self._advance()
+
+    def _advance(self):
+        ok, frame = self._cap.read()
+        if not ok:
+            self._done = True
+            return
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        h, w = frame.shape[:2]
+        surf = pygame.image.frombuffer(frame.tobytes(), (w, h), "RGB")
+        if (w, h) != (SCREEN_W, SCREEN_H):
+            surf = pygame.transform.smoothscale(surf, (SCREEN_W, SCREEN_H))
+        self.surface = surf
+
+    def update(self, dt):
+        if not self._cap or self._done:
+            return
+        self._t += dt
+        while self._t >= self._frame_dt and not self._done:
+            self._t -= self._frame_dt
+            self._advance()
+
+    def draw(self, surface):
+        if self.surface is None:
+            return False
+        surface.blit(self.surface, (0, 0))
+        return True
+
+
 # ─── GAME ─────────────────────────────────────────────────────────────────────
 
 class Game:
@@ -434,49 +493,63 @@ class Game:
 
 # ─── MENU ─────────────────────────────────────────────────────────────────────
 
+menu_video = MenuVideo(_TITLE_VIDEO_PATH)
+
+
 def draw_menu():
-    screen.fill(SKY)
-    # City silhouette
-    for i in range(20):
-        bw = random.randint(40, 90)
-        bh = random.randint(80, 280)
-        bx = i * 65 - 10
-        by = SCREEN_H - bh - 30
-        pygame.draw.rect(screen, (30, 32, 38), (bx, by, bw, bh))
-    # Stars
-    for i in range(60):
-        sx2 = (i * 137) % SCREEN_W
-        sy2 = (i * 97) % (SCREEN_H // 2)
-        pygame.draw.circle(screen, WHITE, (sx2, sy2), 1)
-
-    # Title
-    draw_text(screen, "SUPERMAN", font_xl, YELLOW_S, SCREEN_W // 2, 130, center=True)
-    draw_text(screen, "Guardian of Metropolis", font_large, BLUE_S, SCREEN_W // 2, 200, center=True)
-
-    # Controls box
-    bx2, by2 = SCREEN_W // 2 - 300, 265
-    bg = pygame.Surface((600, 240), pygame.SRCALPHA)
-    bg.fill((0, 0, 0, 160))
-    screen.blit(bg, (bx2, by2))
-    pygame.draw.rect(screen, BLUE_S, (bx2, by2, 600, 240), 2)
-    controls = [
-        ("WASD / Arrows", "Fly"),
-        ("Space / Left Click", "Heat Vision (hold)"),
-        ("F / Right Click", "Freeze Breath"),
-        ("Q", "Super Punch (dash to enemy)"),
-        ("Shift", "Super Speed"),
-        ("Mouse", "Aim direction"),
-    ]
-    for i, (key, desc) in enumerate(controls):
-        y = by2 + 16 + i * 36
-        draw_text(screen, key, font_small, YELLOW_S, bx2 + 20, y)
-        draw_text(screen, desc, font_small, WHITE, bx2 + 220, y)
-
-    # Start prompt
     t = pygame.time.get_ticks() / 1000
     alpha = int(180 + 75 * abs(math.sin(t * 2)))
-    draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 540, center=True)
-    draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 590, center=True)
+
+    if menu_video.draw(screen):
+        # Video already carries the title, skyline and its own "press start"
+        # card, so just add a slim functional footer with the real key binds.
+        foot_bg = pygame.Surface((SCREEN_W, 34), pygame.SRCALPHA)
+        foot_bg.fill((0, 0, 0, 130))
+        screen.blit(foot_bg, (0, SCREEN_H - 34))
+        draw_text(screen, "WASD/Arrows: Fly   Mouse: Aim   ENTER: Begin   ESC: Quit",
+                  font_small, (*GOLD[:3], alpha), SCREEN_W // 2, SCREEN_H - 17, center=True)
+    else:
+        # Fallback if the video/opencv isn't available
+        screen.fill(SKY)
+        # City silhouette
+        for i in range(20):
+            bw = random.randint(40, 90)
+            bh = random.randint(80, 280)
+            bx = i * 65 - 10
+            by = SCREEN_H - bh - 30
+            pygame.draw.rect(screen, (30, 32, 38), (bx, by, bw, bh))
+        # Stars
+        for i in range(60):
+            sx2 = (i * 137) % SCREEN_W
+            sy2 = (i * 97) % (SCREEN_H // 2)
+            pygame.draw.circle(screen, WHITE, (sx2, sy2), 1)
+
+        # Title
+        draw_text(screen, "SUPERMAN", font_xl, YELLOW_S, SCREEN_W // 2, 130, center=True)
+        draw_text(screen, "Guardian of Metropolis", font_large, BLUE_S, SCREEN_W // 2, 200, center=True)
+
+        # Controls box
+        bx2, by2 = SCREEN_W // 2 - 300, 265
+        bg = pygame.Surface((600, 240), pygame.SRCALPHA)
+        bg.fill((0, 0, 0, 160))
+        screen.blit(bg, (bx2, by2))
+        pygame.draw.rect(screen, BLUE_S, (bx2, by2, 600, 240), 2)
+        controls = [
+            ("WASD / Arrows", "Fly"),
+            ("Space / Left Click", "Heat Vision (hold)"),
+            ("F / Right Click", "Freeze Breath"),
+            ("Q", "Super Punch (dash to enemy)"),
+            ("Shift", "Super Speed"),
+            ("Mouse", "Aim direction"),
+        ]
+        for i, (key, desc) in enumerate(controls):
+            y = by2 + 16 + i * 36
+            draw_text(screen, key, font_small, YELLOW_S, bx2 + 20, y)
+            draw_text(screen, desc, font_small, WHITE, bx2 + 220, y)
+
+        # Start prompt
+        draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 540, center=True)
+        draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 590, center=True)
 
     pygame.display.flip()
 
@@ -519,6 +592,7 @@ async def main():
                     if event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         return
+            menu_video.update(dt)
             draw_menu()
 
         elif state == 'play':
