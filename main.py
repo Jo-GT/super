@@ -60,27 +60,43 @@ def _load_sound(filename):
         return None
 
 
-snd_wind   = _load_sound("flying wind noise.mp3")
-snd_sprint = _load_sound("beginsprint.mp3")
-snd_heat   = _load_sound("heatvision.mp3")
-snd_freeze = _load_sound("freeze breath.mp3")
-snd_punch  = _load_sound("punch.mp3")
+snd_wind      = _load_sound("flying wind noise.mp3")
+snd_sprint    = _load_sound("beginsprint.mp3")
+snd_heat      = _load_sound("heatvision.mp3")
+snd_freeze    = _load_sound("freeze breath.mp3")
+snd_punch     = _load_sound("punch.mp3")
+snd_gameover  = _load_sound("GameOver.mp3")
 
-try:
-    pygame.mixer.music.load(os.path.join(_SOUNDS_DIR, "mainmenutheme.mp3"))
-    _menu_music_ok = True
-except Exception:
-    _menu_music_ok = False
+_MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.mp3")
+_BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.mp3")
+_current_music = None  # 'menu' | 'bgm' | None
+
+
+def _play_music(path, volume, tag):
+    global _current_music
+    if _current_music == tag:
+        return
+    try:
+        pygame.mixer.music.load(path)
+        pygame.mixer.music.set_volume(volume)
+        pygame.mixer.music.play(loops=-1)
+        _current_music = tag
+    except Exception:
+        pass
 
 
 def play_menu_music():
-    if _menu_music_ok and not pygame.mixer.music.get_busy():
-        pygame.mixer.music.play(loops=-1)
+    _play_music(_MENU_MUSIC_PATH, 1.0, 'menu')
 
 
-def stop_menu_music():
-    if _menu_music_ok:
-        pygame.mixer.music.stop()
+def play_bgm_music():
+    _play_music(_BGM_MUSIC_PATH, 0.55, 'bgm')
+
+
+def stop_music():
+    global _current_music
+    pygame.mixer.music.stop()
+    _current_music = None
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -663,9 +679,9 @@ async def main():
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        stop_menu_music()
                         game = Game()
                         state = 'play'
+                        play_bgm_music()
                     if event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         return
@@ -680,6 +696,9 @@ async def main():
                 state = 'menu'
             elif not game.superman.alive:
                 game.stop_sounds()
+                stop_music()
+                if snd_gameover:
+                    snd_gameover.play()
                 state = 'gameover'
             else:
                 game.update(dt)
@@ -692,6 +711,7 @@ async def main():
                     if event.key == pygame.K_RETURN:
                         game = Game()
                         state = 'play'
+                        play_bgm_music()
                     if event.key == pygame.K_ESCAPE:
                         play_menu_music()
                         state = 'menu'
