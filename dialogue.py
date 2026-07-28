@@ -4,16 +4,39 @@ from constants import *
 
 _SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
 
-# Keep in sync with main.HUD.MINIMAP_Y (= SCREEN_H - 170). Superman's popup is
-# anchored just above this line so it never overlaps the minimap box, which
-# occupies the screen's literal bottom-right corner.
-_MINIMAP_TOP = SCREEN_H - 170
+BAR_H = 170
+PORTRAIT_H = 130
+PORTRAIT_MARGIN = 16
+
+_NAME_FONT = None
+_TEXT_FONT = None
 
 
-def _load_sprite(path, size):
+def _ensure_fonts():
+    # Deferred until first use: pygame.font isn't initialized yet when this
+    # module is imported (main.py imports it before calling pygame.init()).
+    global _NAME_FONT, _TEXT_FONT
+    if _NAME_FONT is None:
+        try:
+            _NAME_FONT = pygame.font.SysFont("Arial", 20, bold=True)
+            _TEXT_FONT = pygame.font.SysFont("Arial", 24, bold=True)
+        except Exception:
+            _NAME_FONT = pygame.font.Font(None, 20)
+            _TEXT_FONT = pygame.font.Font(None, 24)
+
+
+def _load_face_sprite(path, crop_frac, height):
+    """Load an image and crop to the face/head region (crop_frac as
+    (x0, y0, x1, y1) fractions of the source image), scaled to a fixed
+    height while preserving the crop's aspect ratio."""
     try:
         img = pygame.image.load(path).convert_alpha()
-        return pygame.transform.smoothscale(img, size)
+        w, h = img.get_size()
+        x0, y0, x1, y1 = crop_frac
+        rect = pygame.Rect(int(x0 * w), int(y0 * h), int((x1 - x0) * w), int((y1 - y0) * h))
+        face = img.subsurface(rect).copy()
+        aspect = face.get_width() / face.get_height()
+        return pygame.transform.smoothscale(face, (int(height * aspect), height))
     except Exception:
         return None
 
@@ -33,39 +56,19 @@ def _wrap_text(text, font, max_width):
     return lines
 
 
-class DialogueBox:
-    """One side's talking-portrait + speech bubble."""
+class Speaker:
+    """One side's talking-face portrait + line of text, drawn inside the
+    shared bottom dialogue bar."""
     DISPLAY_TIME = 4.0
     FADE_TIME = 0.6
-    MARGIN = 16
-    BUBBLE_W = 260
-    BUBBLE_H = 110
-    GAP = 14
 
-    def __init__(self, sprite_path, sprite_size, side, font, name, name_color):
-        self.sprite = _load_sprite(sprite_path, sprite_size)
-        self.sprite_size = sprite_size
-        self.side = side  # 'left' (Lex, bottom-left) or 'right' (Superman, above minimap)
-        self.font = font
+    def __init__(self, sprite_path, crop_frac, side, name, name_color):
+        self.sprite = _load_face_sprite(sprite_path, crop_frac, PORTRAIT_H)
+        self.side = side  # 'left' (Lex) or 'right' (Superman)
         self.name = name
         self.name_color = name_color
         self.text = ""
         self.timer = 0.0
-        self.portrait_rect, self.bubble_rect = self._compute_rects()
-
-    def _compute_rects(self):
-        w, h = self.sprite_size
-        if self.side == 'left':
-            portrait = pygame.Rect(self.MARGIN, SCREEN_H - self.MARGIN - h, w, h)
-            bubble_bottom = SCREEN_H - 130 - 8  # 8px above HUD's event banner top
-            bubble = pygame.Rect(portrait.right + self.GAP, bubble_bottom - self.BUBBLE_H,
-                                  self.BUBBLE_W, self.BUBBLE_H)
-        else:
-            portrait_bottom = _MINIMAP_TOP - 8  # 8px above the minimap
-            portrait = pygame.Rect(SCREEN_W - self.MARGIN - w, portrait_bottom - h, w, h)
-            bubble = pygame.Rect(portrait.left - self.GAP - self.BUBBLE_W, portrait_bottom - self.BUBBLE_H,
-                                  self.BUBBLE_W, self.BUBBLE_H)
-        return portrait, bubble
 
     def show(self, text):
         self.text = text
@@ -78,54 +81,59 @@ class DialogueBox:
     def visible(self):
         return self.timer > 0
 
-    def draw(self, surface):
+    @property
+    def alpha(self):
+        return 255 if self.timer > self.FADE_TIME else int(255 * (self.timer / self.FADE_TIME))
+
+    def draw(self, surface, bar_y):
         if not self.visible:
             return
-        alpha = 255 if self.timer > self.FADE_TIME else int(255 * (self.timer / self.FADE_TIME))
+        alpha = self.alpha
+        portrait_w = self.sprite.get_width() if self.sprite is not None else PORTRAIT_H
+        py = bar_y + (BAR_H - PORTRAIT_H) // 2
 
-        # Portrait
-        pr = self.portrait_rect
+        if self.side == 'left':
+            px = PORTRAIT_MARGIN
+            text_x0 = px + portrait_w + 22
+            text_x1 = SCREEN_W // 2 - 22
+        else:
+            px = SCREEN_W - PORTRAIT_MARGIN - portrait_w
+            text_x0 = SCREEN_W // 2 + 22
+            text_x1 = px - 22
+
+        # Portrait (zoomed face crop)
         if self.sprite is not None:
             img = self.sprite
             if alpha < 255:
                 img = img.copy()
                 img.set_alpha(alpha)
-            surface.blit(img, pr)
+            frame = pygame.Rect(px - 4, py - 4, portrait_w + 8, PORTRAIT_H + 8)
+            pygame.draw.rect(surface, (*self.name_color[:3], alpha), frame, 3, border_radius=8)
+            surface.blit(img, (px, py))
         else:
-            fallback = pygame.Surface(pr.size, pygame.SRCALPHA)
+            fallback = pygame.Surface((portrait_w, PORTRAIT_H), pygame.SRCALPHA)
             fallback.fill((*self.name_color[:3], min(200, alpha)))
-            surface.blit(fallback, pr)
+            surface.blit(fallback, (px, py))
 
-        # Bubble
-        br = self.bubble_rect
-        bs = pygame.Surface(br.size, pygame.SRCALPHA)
-        bs.fill((0, 0, 0, int(170 * alpha / 255)))
-        pygame.draw.rect(bs, (*self.name_color[:3], alpha), bs.get_rect(), 2, border_radius=10)
-        surface.blit(bs, br)
-
-        # Tail (small triangle connecting bubble to portrait)
-        if self.side == 'left':
-            tail = [(br.left, br.bottom - 30), (br.left, br.bottom - 10), (pr.right, pr.top + 20)]
-        else:
-            tail = [(br.right, br.bottom - 30), (br.right, br.bottom - 10), (pr.left, pr.top + 20)]
-        pygame.draw.polygon(surface, (*self.name_color[:3], alpha), tail)
-
-        # Name + wrapped text
-        name_surf = self.font.render(self.name, True, self.name_color[:3])
-        surface.blit(name_surf, (br.x + 10, br.y + 8))
-        for i, line in enumerate(_wrap_text(self.text, self.font, br.w - 20)):
-            line_surf = self.font.render(line, True, (255, 255, 255))
-            surface.blit(line_surf, (br.x + 10, br.y + 30 + i * 20))
+        # Name tag + wrapped dialogue text
+        name_surf = _NAME_FONT.render(self.name, True, self.name_color[:3])
+        name_surf.set_alpha(alpha)
+        surface.blit(name_surf, (text_x0, bar_y + 18))
+        for i, line in enumerate(_wrap_text(self.text, _TEXT_FONT, text_x1 - text_x0)):
+            line_surf = _TEXT_FONT.render(line, True, (255, 255, 255))
+            line_surf.set_alpha(alpha)
+            surface.blit(line_surf, (text_x0, bar_y + 48 + i * 28))
 
 
 class DialogueManager:
-    def __init__(self, font):
-        self.lex = DialogueBox(
-            os.path.join(_SPRITES_DIR, "lexcorp", "lex_regular.png"), (72, 145),
-            'left', font, "LEX LUTHOR", GOLD)
-        self.superman = DialogueBox(
-            os.path.join(_SPRITES_DIR, "superman", "superman standing flight.png"), (70, 115),
-            'right', font, "SUPERMAN", BLUE_S)
+    def __init__(self):
+        _ensure_fonts()
+        self.lex = Speaker(
+            os.path.join(_SPRITES_DIR, "lexcorp", "lex_regular.png"),
+            (0.14, 0.0, 0.86, 0.28), 'left', "LEX LUTHOR", GOLD)
+        self.superman = Speaker(
+            os.path.join(_SPRITES_DIR, "superman", "superman standing flight.png"),
+            (0.34, 0.02, 0.82, 0.27), 'right', "SUPERMAN", BLUE_S)
 
     def trigger(self, lex_line, superman_line):
         self.lex.show(lex_line)
@@ -135,6 +143,23 @@ class DialogueManager:
         self.lex.update(dt)
         self.superman.update(dt)
 
+    @property
+    def visible(self):
+        return self.lex.visible or self.superman.visible
+
     def draw(self, surface):
-        self.lex.draw(surface)
-        self.superman.draw(surface)
+        if not self.visible:
+            return
+        bar_y = SCREEN_H - BAR_H
+        alpha = max(self.lex.alpha if self.lex.visible else 0,
+                    self.superman.alpha if self.superman.visible else 0)
+
+        bg = pygame.Surface((SCREEN_W, BAR_H), pygame.SRCALPHA)
+        bg.fill((6, 6, 14, int(210 * alpha / 255)))
+        pygame.draw.line(bg, (*WHITE, int(120 * alpha / 255)), (0, 0), (SCREEN_W, 0), 2)
+        pygame.draw.line(bg, (*LGRAY, int(90 * alpha / 255)),
+                          (SCREEN_W // 2, 14), (SCREEN_W // 2, BAR_H - 14), 1)
+        surface.blit(bg, (0, bar_y))
+
+        self.lex.draw(surface, bar_y)
+        self.superman.draw(surface, bar_y)
