@@ -2,7 +2,7 @@ import pygame
 import math
 import random
 from constants import *
-from entities import Thug, Robot, BrainiacDrone, Metallo, Civilian, Animal, Projectile
+from entities import Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit, Civilian, Animal, Projectile
 
 
 class BaseEvent:
@@ -113,6 +113,12 @@ def make_brainiac_event(x, y):
 
 def make_metallo_event(x, y):
     return FightEvent(x, y, EventType.FIGHT_METALLO, Metallo, 1)
+
+def make_lex_goons_event(x, y):
+    return FightEvent(x, y, EventType.FIGHT_LEX_GOONS, LexGoon, random.randint(4, 5))
+
+def make_lex_mechsuit_event(x, y):
+    return FightEvent(x, y, EventType.FIGHT_LEX_MECHSUIT, LexMechSuit, 1)
 
 
 # ─── HOSTAGE SITUATION ────────────────────────────────────────────────────────
@@ -520,6 +526,8 @@ EVENT_FACTORIES = {
     EventType.FIGHT_ROBOTS:    make_robots_event,
     EventType.FIGHT_BRAINIAC:  make_brainiac_event,
     EventType.FIGHT_METALLO:   make_metallo_event,
+    EventType.FIGHT_LEX_GOONS:    make_lex_goons_event,
+    EventType.FIGHT_LEX_MECHSUIT: make_lex_mechsuit_event,
     EventType.RESCUE_FIRE:     FireEvent,
     EventType.RESCUE_FALLING:  FallingEvent,
     EventType.RESCUE_CAR:      CarEvent,

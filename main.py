@@ -21,6 +21,7 @@ from city import City
 from particles import ParticleSystem
 from entities import Superman
 from events import BaseEvent, spawn_random_event
+from dialogue import DialogueManager
 
 try:
     import cv2
@@ -374,6 +375,7 @@ class Game:
         self.events: list[BaseEvent] = []
         self.hud    = HUD()
         self.flash  = ScreenFlash()
+        self.dialogue = DialogueManager(font_small)
         self._spawn_cd = 3.0
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
@@ -469,6 +471,7 @@ class Game:
         self.camera.update(s.x, s.y, dt)
         self.pfs.update(dt)
         self.flash.update(dt)
+        self.dialogue.update(dt)
 
         # Flying wind loop: on while actually moving, off when hovering
         flying = math.hypot(s.vx, s.vy) > 0.8
@@ -486,12 +489,17 @@ class Game:
         # Events
         for ev in self.events:
             ev.update(dt, s, self.pfs)
+            if ev.active and ev.event_type in LEX_EVENT_TYPES and not getattr(ev, '_lex_intro_shown', False):
+                ev._lex_intro_shown = True
+                self.dialogue.trigger(LEX_INTRO_LINES[ev.event_type], SUPERMAN_INTRO_LINES[ev.event_type])
             if ev.complete and not hasattr(ev, '_rewarded'):
                 ev._rewarded = True
                 s.score += ev.score_value
                 s.reputation = min(100, s.reputation + 8)
                 self.notify(f"+{ev.score_value}  {ev.name}", GOLD)
                 self.flash.trigger(YELLOW_S, 80)
+                if ev.event_type in LEX_EVENT_TYPES:
+                    self.dialogue.trigger(LEX_DEFEAT_LINES[ev.event_type], SUPERMAN_DEFEAT_LINES[ev.event_type])
             if ev.failed and not hasattr(ev, '_penalised'):
                 ev._penalised = True
                 s.reputation = max(0, s.reputation - 12)
@@ -571,6 +579,9 @@ class Game:
 
         # HUD
         self.hud.draw(screen, self.superman, self.events, self.camera, self._active_event)
+
+        # Lex/Superman dialogue popups
+        self.dialogue.draw(screen)
 
         # Notifications
         for i, (text, color, timer) in enumerate(reversed(self._notifications)):
