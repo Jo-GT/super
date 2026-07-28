@@ -197,9 +197,10 @@ class Superman:
 
     def try_speed(self):
         if self.speed_cd > 0 or self.speed_remaining > 0:
-            return
+            return False
         self.speed_remaining = self.SPEED_DUR
         self.speed_cd = self.SPEED_CD
+        return True
 
     def _in_beam(self, px, py, tx, ty, threshold=28):
         ax, ay = self.head_pos

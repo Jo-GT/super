@@ -48,6 +48,37 @@ except Exception:
     font_small = pygame.font.Font(None, 17)
     font_tiny  = pygame.font.Font(None, 14)
 
+# ─── SOUND ────────────────────────────────────────────────────────────────────
+
+_SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+
+
+def _load_sound(filename):
+    try:
+        return pygame.mixer.Sound(os.path.join(_SOUNDS_DIR, filename))
+    except Exception:
+        return None
+
+
+snd_wind   = _load_sound("flying wind noise.mp3")
+snd_sprint = _load_sound("beginsprint.mp3")
+
+try:
+    pygame.mixer.music.load(os.path.join(_SOUNDS_DIR, "mainmenutheme.mp3"))
+    _menu_music_ok = True
+except Exception:
+    _menu_music_ok = False
+
+
+def play_menu_music():
+    if _menu_music_ok and not pygame.mixer.music.get_busy():
+        pygame.mixer.music.play(loops=-1)
+
+
+def stop_menu_music():
+    if _menu_music_ok:
+        pygame.mixer.music.stop()
+
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -327,6 +358,7 @@ class Game:
         self._spawn_cd = 5.0
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
+        self._wind_playing = False
 
         # Spawn initial events
         for _ in range(3):
@@ -375,9 +407,15 @@ class Game:
 
         # Speed: Shift
         if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
-            s.try_speed()
+            if s.try_speed() and snd_sprint:
+                snd_sprint.play()
 
         s.update(dt, keys, mouse_world)
+
+    def stop_sounds(self):
+        if snd_wind:
+            snd_wind.stop()
+        self._wind_playing = False
 
     def update(self, dt):
         s = self.superman
@@ -388,6 +426,16 @@ class Game:
         self.camera.update(s.x, s.y, dt)
         self.pfs.update(dt)
         self.flash.update(dt)
+
+        # Flying wind loop: on while actually moving, off when hovering
+        flying = math.hypot(s.vx, s.vy) > 0.8
+        if snd_wind:
+            if flying and not self._wind_playing:
+                snd_wind.play(loops=-1)
+                self._wind_playing = True
+            elif not flying and self._wind_playing:
+                snd_wind.stop()
+                self._wind_playing = False
 
         # Notifications
         self._notifications = [[t, c, ti - dt] for t, c, ti in self._notifications if ti - dt > 0]
@@ -572,6 +620,7 @@ def draw_game_over(score, reputation):
 async def main():
     state = 'menu'
     game: Game | None = None
+    play_menu_music()
 
     while True:
         dt = clock.tick(FPS) / 1000.0
@@ -587,6 +636,7 @@ async def main():
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
+                        stop_menu_music()
                         game = Game()
                         state = 'play'
                     if event.key == pygame.K_ESCAPE:
@@ -598,8 +648,11 @@ async def main():
         elif state == 'play':
             escape = any(e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE for e in events)
             if escape:
+                game.stop_sounds()
+                play_menu_music()
                 state = 'menu'
             elif not game.superman.alive:
+                game.stop_sounds()
                 state = 'gameover'
             else:
                 game.update(dt)
@@ -613,6 +666,7 @@ async def main():
                         game = Game()
                         state = 'play'
                     if event.key == pygame.K_ESCAPE:
+                        play_menu_music()
                         state = 'menu'
             draw_game_over(game.superman.score, game.superman.reputation)
 
