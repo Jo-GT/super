@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s \"https://api.github.com/repos/Jo-GT/super/actions/runs/30443750597/jobs\")",
+      "Bash(python -c ' *)",
+      "Bash(curl -sL \"https://api.github.com/repos/Jo-GT/super/actions/jobs/90548954521/logs\" -o /tmp/joblog.txt -w \"HTTP_STATUS:%{http_code}\\\\n\")",
+      "Read(//tmp/**)",
+      "Bash(rm -rf build)",
+      "Bash(python -m pygbag --build main.py)",
+      "Bash(echo \"EXIT:$?\")",
+      "Bash(python -m pygbag --build --disable-sound-format-error main.py)",
+      "Bash(git commit -m ' *)",
+      "Bash(curl -s \"https://api.github.com/repos/Jo-GT/super/commits/3a9f2fa/check-runs\")",
+      "Bash(curl -s \"https://api.github.com/repos/Jo-GT/super/check-runs/90565169544/annotations\")",
+      "Bash(python -m json.tool)",
+      "Bash(ffmpeg -version)",
+      "Bash(python -c \"import os; print\\(repr\\(os.popen\\('ffmpeg -version'\\).read\\(\\)[:200]\\)\\)\")",
+      "Bash(cd \"c:\\\\Users\\\\JoGouveiaTomas\\\\Documents\\\\GitHub\\\\super\\\\Sounds\" && rm *.mp3 && ls -la)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\JoGouveiaTomas\\Documents\\GitHub\\super"
+    ]
+  }
+}
