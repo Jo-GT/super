@@ -23,7 +23,11 @@ jobs:
         run: pip install pygbag
 
       - name: Build WebAssembly bundle
-        run: python -m pygbag --build main.py
+        # pygbag hard-fails on any .mp3 asset (unreliable browser/WASM MP3
+        # decoding) unless this is passed. Sounds/ ships mp3s, so suppress
+        # the check rather than block every build; consider re-encoding to
+        # ogg later for more reliable in-browser playback.
+        run: python -m pygbag --build --disable-sound-format-error main.py
 
       - name: Publish build output into docs/
         run: |
