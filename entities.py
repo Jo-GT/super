@@ -17,6 +17,43 @@ def _load_lex_sprite(filename, size):
         return None
 
 
+_GAME_SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
+
+
+def load_game_sprite(rel_path, size):
+    """Load a sprite from anywhere under sprites/ (rel_path uses forward
+    slashes, e.g. "Metallo/metallo.png"), scaled to an exact size."""
+    try:
+        path = os.path.join(_GAME_SPRITES_DIR, *rel_path.split("/"))
+        img = pygame.image.load(path).convert_alpha()
+        return pygame.transform.smoothscale(img, size)
+    except Exception:
+        return None
+
+
+_ANIMAL_SPRITE_FILES = {
+    'cat': ["black cat.png", "brown cat.png", "white cat.png"],
+    'dog': ["black dog.png", "brown dog.png", "white dog.png"],
+}
+_ANIMAL_TARGET_H = {'cat': 30, 'dog': 24}
+_animal_sprite_cache = {}
+
+
+def _get_animal_sprite(kind, filename):
+    key = (kind, filename)
+    if key not in _animal_sprite_cache:
+        try:
+            path = os.path.join(_GAME_SPRITES_DIR, "Animals", filename)
+            img = pygame.image.load(path).convert_alpha()
+            w, h = img.get_size()
+            th = _ANIMAL_TARGET_H[kind]
+            tw = max(1, round(th * w / h))
+            _animal_sprite_cache[key] = pygame.transform.smoothscale(img, (tw, th))
+        except Exception:
+            _animal_sprite_cache[key] = False
+    return _animal_sprite_cache[key] or None
+
+
 def _rot(cx, cy, dx, dy, angle):
     c, s = math.cos(angle), math.sin(angle)
     return cx + dx * c - dy * s, cy + dx * s + dy * c
@@ -576,8 +613,13 @@ class Metallo(Enemy):
     HP = 220; SPEED = 0.9; DMG = 18.0; COLOR = (85, 90, 95); RADIUS = 26
     KRYPTO_RADIUS = 160; KRYPTO_DPS = 18.0; SHOT_CD = 2.5; SHOT_SPEED = 3.5
 
+    _SPRITE_SIZE = (85, 90)
+    _sprite = None
+
     def __init__(self, x, y):
         super().__init__(x, y)
+        if Metallo._sprite is None:
+            Metallo._sprite = load_game_sprite("Metallo/metallo.png", self._SPRITE_SIZE) or False
         self.shot_cd = 1.0
         self.projectiles: list[Projectile] = []
         self._t = 0.0
@@ -622,10 +664,22 @@ class Metallo(Enemy):
         pygame.draw.circle(ks, (*KRYPTO, alpha), (self.KRYPTO_RADIUS, self.KRYPTO_RADIUS), self.KRYPTO_RADIUS)
         surface.blit(ks, (sx - self.KRYPTO_RADIUS, sy - self.KRYPTO_RADIUS))
 
-        c = WHITE if self._hit_flash > 0 else (ICE if self.frozen > 0 else (85, 90, 95))
-        pts = [_rot(sx, sy, *p, self._angle) for p in [(-22, -14), (22, -14), (24, -7), (24, 7), (22, 14), (-22, 14)]]
-        pygame.draw.polygon(surface, c, pts)
-        pygame.draw.polygon(surface, DARK_GRAY, pts, 3)
+        sprite = Metallo._sprite
+        if sprite:
+            img = sprite
+            if self._hit_flash > 0:
+                img = sprite.copy(); img.fill((180, 180, 180, 0), special_flags=pygame.BLEND_RGB_ADD)
+            elif self.frozen > 0:
+                img = sprite.copy(); img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
+            flip = math.cos(self._angle) < 0
+            draw_img = pygame.transform.flip(img, True, False) if flip else img
+            rect = draw_img.get_rect(center=(sx, sy))
+            surface.blit(draw_img, rect)
+        else:
+            c = WHITE if self._hit_flash > 0 else (ICE if self.frozen > 0 else (85, 90, 95))
+            pts = [_rot(sx, sy, *p, self._angle) for p in [(-22, -14), (22, -14), (24, -7), (24, 7), (22, 14), (-22, 14)]]
+            pygame.draw.polygon(surface, c, pts)
+            pygame.draw.polygon(surface, DARK_GRAY, pts, 3)
 
         # Kryptonite core (pulsing)
         kr = int(9 + 4 * abs(math.sin(self._t * 3)))
@@ -808,6 +862,10 @@ class Animal:
         self.saved = False
         self.kind = kind or random.choice(self.TYPES)
         self._t = 0.0
+        self.sprite = None
+        if self.kind in _ANIMAL_SPRITE_FILES:
+            fname = random.choice(_ANIMAL_SPRITE_FILES[self.kind])
+            self.sprite = _get_animal_sprite(self.kind, fname)
 
     def update(self, dt, superman):
         self._t += dt
@@ -821,21 +879,26 @@ class Animal:
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
         bob = int(2 * math.sin(self._t * 3))
-        if self.kind == 'cat':
+        if self.sprite is not None:
+            rect = self.sprite.get_rect(center=(sx, sy + bob))
+            surface.blit(self.sprite, rect)
+        elif self.kind == 'cat':
             c = (200, 160, 100)
             pygame.draw.ellipse(surface, c, (sx - 10, sy - 7 + bob, 20, 14))
             # Ears
             pygame.draw.polygon(surface, c, [(sx - 8, sy - 7 + bob), (sx - 12, sy - 14 + bob), (sx - 4, sy - 7 + bob)])
             pygame.draw.polygon(surface, c, [(sx + 4, sy - 7 + bob), (sx + 12, sy - 14 + bob), (sx + 8, sy - 7 + bob)])
+            pygame.draw.circle(surface, WHITE, (sx, sy - 18 + bob), 10)
         elif self.kind == 'dog':
             c = (180, 130, 80)
             pygame.draw.ellipse(surface, c, (sx - 12, sy - 6 + bob, 24, 12))
             pygame.draw.circle(surface, c, (sx + 12, sy - 4 + bob), 7)
+            pygame.draw.circle(surface, WHITE, (sx, sy - 18 + bob), 10)
         else:  # bird
             c = (100, 160, 220)
             pygame.draw.ellipse(surface, c, (sx - 8, sy - 5 + bob, 16, 10))
             pygame.draw.polygon(surface, (255, 200, 50), [(sx + 8, sy + bob), (sx + 14, sy - 3 + bob), (sx + 8, sy - 3 + bob)])
-        pygame.draw.circle(surface, WHITE, (sx, sy - 18 + bob), 10)
+            pygame.draw.circle(surface, WHITE, (sx, sy - 18 + bob), 10)
         gs = pygame.Surface((30, 30), pygame.SRCALPHA)
         pygame.draw.circle(gs, (*GREEN, int(100 + 80 * math.sin(self._t * 4))), (15, 15), 12, 2)
         surface.blit(gs, (sx - 15, sy - 28 + bob))

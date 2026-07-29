@@ -152,3 +152,20 @@ SUPERMAN_DEFEAT_LINES = {
     EventType.FIGHT_LEX_GOONS:    "Tell your boss Metropolis says hello.",
     EventType.FIGHT_LEX_MECHSUIT: "Suit's down, Lex. Try origami next time -- less collateral damage.",
 }
+
+METALLO_EVENT_TYPES = {
+    EventType.FIGHT_METALLO,
+}
+
+METALLO_INTRO_LINES = {
+    EventType.FIGHT_METALLO: "Flesh is weak, Superman. Let's see how you handle a real monster.",
+}
+METALLO_DEFEAT_LINES = {
+    EventType.FIGHT_METALLO: "This... isn't... over...",
+}
+SUPERMAN_VS_METALLO_INTRO_LINES = {
+    EventType.FIGHT_METALLO: "John Corben. Still hiding behind a chunk of kryptonite?",
+}
+SUPERMAN_VS_METALLO_DEFEAT_LINES = {
+    EventType.FIGHT_METALLO: "Go cool that core off somewhere far from Metropolis.",
+}

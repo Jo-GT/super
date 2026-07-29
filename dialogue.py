@@ -58,17 +58,24 @@ def _wrap_text(text, font, max_width):
 
 class Speaker:
     """One side's talking-face portrait + line of text, drawn inside the
-    shared bottom dialogue bar."""
+    shared bottom dialogue bar. The portrait/name/color can be swapped at
+    runtime via set_character() so one slot can represent different
+    villains (e.g. Lex vs. Metallo) without allocating a new Speaker."""
     DISPLAY_TIME = 4.0
     FADE_TIME = 0.6
 
-    def __init__(self, sprite_path, crop_frac, side, name, name_color):
-        self.sprite = _load_face_sprite(sprite_path, crop_frac, PORTRAIT_H)
-        self.side = side  # 'left' (Lex) or 'right' (Superman)
+    def __init__(self, sprite, side, name, name_color):
+        self.sprite = sprite
+        self.side = side  # 'left' (villain) or 'right' (Superman)
         self.name = name
         self.name_color = name_color
         self.text = ""
         self.timer = 0.0
+
+    def set_character(self, sprite, name, name_color):
+        self.sprite = sprite
+        self.name = name
+        self.name_color = name_color
 
     def show(self, text):
         self.text = text
@@ -128,30 +135,42 @@ class Speaker:
 class DialogueManager:
     def __init__(self):
         _ensure_fonts()
-        self.lex = Speaker(
-            os.path.join(_SPRITES_DIR, "lexcorp", "lex_regular.png"),
-            (0.14, 0.0, 0.86, 0.28), 'left', "LEX LUTHOR", GOLD)
+        self._characters = {
+            'lex': (
+                _load_face_sprite(os.path.join(_SPRITES_DIR, "lexcorp", "lex_regular.png"),
+                                   (0.14, 0.0, 0.86, 0.28), PORTRAIT_H),
+                "LEX LUTHOR", GOLD),
+            'metallo': (
+                _load_face_sprite(os.path.join(_SPRITES_DIR, "Metallo", "close up metallo.png"),
+                                   (0.0, 0.0, 1.0, 1.0), PORTRAIT_H),
+                "METALLO", KRYPTO),
+        }
+        default_sprite, default_name, default_color = self._characters['lex']
+        self.villain = Speaker(default_sprite, 'left', default_name, default_color)
         self.superman = Speaker(
-            os.path.join(_SPRITES_DIR, "superman", "superman standing flight.png"),
-            (0.34, 0.02, 0.82, 0.27), 'right', "SUPERMAN", BLUE_S)
+            _load_face_sprite(os.path.join(_SPRITES_DIR, "superman", "superman standing flight.png"),
+                               (0.34, 0.02, 0.82, 0.27), PORTRAIT_H),
+            'right', "SUPERMAN", BLUE_S)
 
-    def trigger(self, lex_line, superman_line):
-        self.lex.show(lex_line)
+    def trigger(self, character_key, villain_line, superman_line):
+        sprite, name, color = self._characters[character_key]
+        self.villain.set_character(sprite, name, color)
+        self.villain.show(villain_line)
         self.superman.show(superman_line)
 
     def update(self, dt):
-        self.lex.update(dt)
+        self.villain.update(dt)
         self.superman.update(dt)
 
     @property
     def visible(self):
-        return self.lex.visible or self.superman.visible
+        return self.villain.visible or self.superman.visible
 
     def draw(self, surface):
         if not self.visible:
             return
         bar_y = SCREEN_H - BAR_H
-        alpha = max(self.lex.alpha if self.lex.visible else 0,
+        alpha = max(self.villain.alpha if self.villain.visible else 0,
                     self.superman.alpha if self.superman.visible else 0)
 
         bg = pygame.Surface((SCREEN_W, BAR_H), pygame.SRCALPHA)
@@ -161,5 +180,5 @@ class DialogueManager:
                           (SCREEN_W // 2, 14), (SCREEN_W // 2, BAR_H - 14), 1)
         surface.blit(bg, (0, bar_y))
 
-        self.lex.draw(surface, bar_y)
+        self.villain.draw(surface, bar_y)
         self.superman.draw(surface, bar_y)
