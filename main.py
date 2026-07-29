@@ -23,13 +23,8 @@ from entities import Superman
 from events import BaseEvent, spawn_random_event
 from dialogue import DialogueManager
 
-try:
-    import cv2
-    _HAS_CV2 = True
-except Exception:
-    _HAS_CV2 = False
-
-_TITLE_VIDEO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Title Page", "Superman Title.mp4")
+_TITLE_FRAMES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Title Page", "frames")
+_TITLE_FRAME_FPS = 15.0
 
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
@@ -310,45 +305,46 @@ class ScreenFlash:
 # ─── TITLE VIDEO ──────────────────────────────────────────────────────────────
 
 class MenuVideo:
-    """Decodes the title mp4 frame-by-frame and plays it once, holding on the
-    last frame (the video's own "PRESS START" card) rather than looping the
-    reveal. Falls back to no-op if opencv or the file isn't available, so the
-    menu still works without the extra dependency."""
+    """Plays the title reveal as a sequence of pre-rendered frame images
+    (extracted once from the source mp4 via ffmpeg -- see Title Page/frames),
+    holding on the last frame (the "PRESS START" card) rather than looping.
+    Uses plain image loading rather than video decoding, so it works the same
+    in the desktop build and the pygbag/WASM web build, where opencv isn't
+    available. Falls back to no-op if the frames folder is missing."""
 
-    def __init__(self, path):
-        self.surface = None
-        self._cap = None
+    def __init__(self, frames_dir, frame_fps):
+        self._frames = []
+        self._index = 0
         self._t = 0.0
-        self._frame_dt = 1 / 30.0
+        self._frame_dt = 1.0 / frame_fps
         self._done = False
-        if not _HAS_CV2:
-            return
-        cap = cv2.VideoCapture(path)
-        if cap.isOpened():
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            self._frame_dt = 1.0 / fps
-            self._cap = cap
-            self._advance()
+        self.surface = None
+        try:
+            names = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(".jpg"))
+            for name in names:
+                self._frames.append(pygame.image.load(os.path.join(frames_dir, name)).convert())
+        except Exception:
+            self._frames = []
+        if self._frames:
+            self._set_frame(0)
 
-    def _advance(self):
-        ok, frame = self._cap.read()
-        if not ok:
-            self._done = True
-            return
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        h, w = frame.shape[:2]
-        surf = pygame.image.frombuffer(frame.tobytes(), (w, h), "RGB")
-        if (w, h) != (SCREEN_W, SCREEN_H):
-            surf = pygame.transform.smoothscale(surf, (SCREEN_W, SCREEN_H))
-        self.surface = surf
+    def _set_frame(self, index):
+        self._index = index
+        frame = self._frames[index]
+        if frame.get_size() != (SCREEN_W, SCREEN_H):
+            frame = pygame.transform.smoothscale(frame, (SCREEN_W, SCREEN_H))
+        self.surface = frame
 
     def update(self, dt):
-        if not self._cap or self._done:
+        if not self._frames or self._done:
             return
         self._t += dt
         while self._t >= self._frame_dt and not self._done:
             self._t -= self._frame_dt
-            self._advance()
+            if self._index + 1 >= len(self._frames):
+                self._done = True
+            else:
+                self._set_frame(self._index + 1)
 
     def draw(self, surface):
         if self.surface is None:
@@ -601,7 +597,7 @@ class Game:
 
 # ─── MENU ─────────────────────────────────────────────────────────────────────
 
-menu_video = MenuVideo(_TITLE_VIDEO_PATH)
+menu_video = MenuVideo(_TITLE_FRAMES_DIR, _TITLE_FRAME_FPS)
 
 
 def draw_menu():
