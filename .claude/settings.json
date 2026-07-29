@@ -19,10 +19,15 @@
       "Bash(curl -s \"https://api.github.com/repos/Jo-GT/super/actions/runs?per_page=6\")",
       "Bash(curl -sI \"https://jo-gt.github.io/super/\")",
       "Bash(python -c \"import pygbag, os; print\\(pygbag.__file__\\)\")",
-      "Bash(python -)"
+      "Bash(python -)",
+      "PowerShell(Get-Command ffmpeg -ErrorAction SilentlyContinue)",
+      "Bash(python -m pip list)",
+      "Bash(git check-ignore *)",
+      "Bash(git log *)"
     ],
     "additionalDirectories": [
-      "C:\\Users\\JoGouveiaTomas\\Documents\\GitHub\\super"
+      "C:\\Users\\JoGouveiaTomas\\Documents\\GitHub\\super",
+      "\\tmp"
     ]
   }
 }
