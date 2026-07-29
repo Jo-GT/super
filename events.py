@@ -1,8 +1,66 @@
 import pygame
 import math
 import random
+import os
 from constants import *
-from entities import Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit, Civilian, Animal, Projectile
+from entities import Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit, Civilian, Animal, Projectile, load_game_sprite
+
+try:
+    import cv2
+    import numpy as np
+    _HAS_CV2 = True
+except Exception:
+    _HAS_CV2 = False
+
+_SPRITES_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
+
+_tree_sprite = None
+_falling_sprite = None
+_fire_frames = None
+
+
+def _get_tree_sprite():
+    global _tree_sprite
+    if _tree_sprite is None:
+        _tree_sprite = load_game_sprite("Environment/tree.png", (140, 140)) or False
+    return _tree_sprite or None
+
+
+def _get_falling_sprite():
+    global _falling_sprite
+    if _falling_sprite is None:
+        _falling_sprite = load_game_sprite("Citizens/falling citizen.png", (67, 100)) or False
+    return _falling_sprite or None
+
+
+def _load_fire_frames():
+    """Decode fire.gif's frames via cv2 (pygame/SDL_image only reads a GIF's
+    first frame). The gif has a flat white background, not real alpha, so we
+    key pure-white pixels to transparent by hand. Falls back to an empty list
+    (procedural flame circles keep working) if cv2 isn't available."""
+    global _fire_frames
+    if _fire_frames is not None:
+        return _fire_frames
+    frames = []
+    if _HAS_CV2:
+        try:
+            path = os.path.join(_SPRITES_ROOT, "Environment", "fire.gif")
+            cap = cv2.VideoCapture(path)
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w = rgb.shape[:2]
+                rgba = np.dstack([rgb, np.full((h, w), 255, dtype=np.uint8)])
+                rgba[np.all(rgb >= 250, axis=2), 3] = 0
+                surf = pygame.image.frombuffer(rgba.tobytes(), (w, h), "RGBA").convert_alpha()
+                frames.append(pygame.transform.smoothscale(surf, (60, 90)))
+            cap.release()
+        except Exception:
+            frames = []
+    _fire_frames = frames
+    return _fire_frames
 
 
 class BaseEvent:
@@ -228,14 +286,25 @@ class FireEvent(BaseEvent):
         pygame.draw.rect(surface, (75, 60, 55), br)
         pygame.draw.rect(surface, (50, 40, 35), br, 2)
         # Flame effects
+        fire_frames = _load_fire_frames()
         for i, (fx, fy) in enumerate(self.flames):
             if self.flame_hp[i] > 0:
                 fsx = int(fx - cam.x); fsy = int(fy - cam.y)
-                fr = int(18 * self.flame_hp[i])
-                fs = pygame.Surface((fr * 3, fr * 3), pygame.SRCALPHA)
-                pygame.draw.circle(fs, (*FIRE_HOT, 200), (fr, fr + fr // 2), fr)
-                pygame.draw.circle(fs, (*FIRE_WARM, 180), (fr, fr), fr // 2)
-                surface.blit(fs, (fsx - fr, fsy - fr - fr // 2))
+                if fire_frames:
+                    idx = int(self._fire_t * 10 + i * 2) % len(fire_frames)
+                    frame = fire_frames[idx]
+                    scale = max(0.3, self.flame_hp[i])
+                    fw = max(1, int(frame.get_width() * scale))
+                    fh = max(1, int(frame.get_height() * scale))
+                    scaled = pygame.transform.smoothscale(frame, (fw, fh))
+                    rect = scaled.get_rect(midbottom=(fsx, fsy + 10))
+                    surface.blit(scaled, rect)
+                else:
+                    fr = int(18 * self.flame_hp[i])
+                    fs = pygame.Surface((fr * 3, fr * 3), pygame.SRCALPHA)
+                    pygame.draw.circle(fs, (*FIRE_HOT, 200), (fr, fr + fr // 2), fr)
+                    pygame.draw.circle(fs, (*FIRE_WARM, 180), (fr, fr), fr // 2)
+                    surface.blit(fs, (fsx - fr, fsy - fr - fr // 2))
         # Citizens
         for c in self.citizens:
             c.draw(surface, cam)
@@ -297,18 +366,25 @@ class FallingEvent(BaseEvent):
         sx = int(self.person_x - cam.x)
         sy = int(self.person_y - cam.y)
         # Person
-        pygame.draw.circle(surface, FLESH, (sx, sy), 8)
-        pygame.draw.line(surface, FLESH, (sx, sy + 8), (sx, sy + 22), 3)
-        pygame.draw.line(surface, FLESH, (sx - 8, sy + 12), (sx + 8, sy + 12), 3)
-        pygame.draw.line(surface, FLESH, (sx - 5, sy + 22), (sx, sy + 32), 3)
-        pygame.draw.line(surface, FLESH, (sx + 5, sy + 22), (sx, sy + 32), 3)
+        sprite = _get_falling_sprite()
+        if sprite is not None:
+            rect = sprite.get_rect(center=(sx, sy))
+            surface.blit(sprite, rect)
+            bar_y = rect.top - 12
+        else:
+            pygame.draw.circle(surface, FLESH, (sx, sy), 8)
+            pygame.draw.line(surface, FLESH, (sx, sy + 8), (sx, sy + 22), 3)
+            pygame.draw.line(surface, FLESH, (sx - 8, sy + 12), (sx + 8, sy + 12), 3)
+            pygame.draw.line(surface, FLESH, (sx - 5, sy + 22), (sx, sy + 32), 3)
+            pygame.draw.line(surface, FLESH, (sx + 5, sy + 22), (sx, sy + 32), 3)
+            bar_y = sy - 20
         # Ground danger indicator
         gy = int(self.ground_y - cam.y)
         pygame.draw.line(surface, (RED[0], RED[1], RED[2]), (sx - 20, gy), (sx + 20, gy), 3)
         # Remaining distance
         progress = max(0, (self.ground_y - self.person_y) / (self.ground_y - (self.y - 280)))
-        pygame.draw.rect(surface, (80, 0, 0), (sx - 20, sy - 20, 40, 5))
-        pygame.draw.rect(surface, RED, (sx - 20, sy - 20, int(40 * progress), 5))
+        pygame.draw.rect(surface, (80, 0, 0), (sx - 20, bar_y, 40, 5))
+        pygame.draw.rect(surface, RED, (sx - 20, bar_y, int(40 * progress), 5))
 
     def _draw_icon(self, surface, sx, sy):
         pygame.draw.circle(surface, FLESH, (sx, sy - 4), 5)
@@ -427,12 +503,16 @@ class CatEvent(BaseEvent):
     def draw(self, surface, cam):
         if self.complete:
             return
-        # Draw tree
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
-        pygame.draw.rect(surface, BROWN, (sx - 6, sy - 10, 12, 60))
-        pygame.draw.circle(surface, PARK, (sx, sy - 20), 32)
-        pygame.draw.circle(surface, (28, 75, 28), (sx, sy - 20), 32, 2)
+        tree = _get_tree_sprite()
+        if tree is not None:
+            rect = tree.get_rect(midbottom=(sx, sy + 55))
+            surface.blit(tree, rect)
+        else:
+            pygame.draw.rect(surface, BROWN, (sx - 6, sy - 10, 12, 60))
+            pygame.draw.circle(surface, PARK, (sx, sy - 20), 32)
+            pygame.draw.circle(surface, (28, 75, 28), (sx, sy - 20), 32, 2)
         self.cat.draw(surface, cam)
         super().draw(surface, cam)
 

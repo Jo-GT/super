@@ -489,9 +489,13 @@ class Game:
         # Events
         for ev in self.events:
             ev.update(dt, s, self.pfs)
-            if ev.active and ev.event_type in LEX_EVENT_TYPES and not getattr(ev, '_lex_intro_shown', False):
-                ev._lex_intro_shown = True
-                self.dialogue.trigger(LEX_INTRO_LINES[ev.event_type], SUPERMAN_INTRO_LINES[ev.event_type])
+            if ev.active and not getattr(ev, '_dialogue_intro_shown', False):
+                if ev.event_type in LEX_EVENT_TYPES:
+                    ev._dialogue_intro_shown = True
+                    self.dialogue.trigger('lex', LEX_INTRO_LINES[ev.event_type], SUPERMAN_INTRO_LINES[ev.event_type])
+                elif ev.event_type in METALLO_EVENT_TYPES:
+                    ev._dialogue_intro_shown = True
+                    self.dialogue.trigger('metallo', METALLO_INTRO_LINES[ev.event_type], SUPERMAN_VS_METALLO_INTRO_LINES[ev.event_type])
             if ev.complete and not hasattr(ev, '_rewarded'):
                 ev._rewarded = True
                 s.score += ev.score_value
@@ -499,7 +503,9 @@ class Game:
                 self.notify(f"+{ev.score_value}  {ev.name}", GOLD)
                 self.flash.trigger(YELLOW_S, 80)
                 if ev.event_type in LEX_EVENT_TYPES:
-                    self.dialogue.trigger(LEX_DEFEAT_LINES[ev.event_type], SUPERMAN_DEFEAT_LINES[ev.event_type])
+                    self.dialogue.trigger('lex', LEX_DEFEAT_LINES[ev.event_type], SUPERMAN_DEFEAT_LINES[ev.event_type])
+                elif ev.event_type in METALLO_EVENT_TYPES:
+                    self.dialogue.trigger('metallo', METALLO_DEFEAT_LINES[ev.event_type], SUPERMAN_VS_METALLO_DEFEAT_LINES[ev.event_type])
             if ev.failed and not hasattr(ev, '_penalised'):
                 ev._penalised = True
                 s.reputation = max(0, s.reputation - 12)
