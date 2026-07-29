@@ -51,7 +51,7 @@ except Exception:
 
 # ─── SOUND ────────────────────────────────────────────────────────────────────
 
-_SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+_SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Sounds")
 
 
 def _load_sound(filename):
@@ -61,15 +61,15 @@ def _load_sound(filename):
         return None
 
 
-snd_wind      = _load_sound("flying wind noise.mp3")
-snd_sprint    = _load_sound("beginsprint.mp3")
-snd_heat      = _load_sound("heatvision.mp3")
-snd_freeze    = _load_sound("freeze breath.mp3")
-snd_punch     = _load_sound("punch.mp3")
-snd_gameover  = _load_sound("GameOver.mp3")
+snd_wind      = _load_sound("flying wind noise.ogg")
+snd_sprint    = _load_sound("beginsprint.ogg")
+snd_heat      = _load_sound("heatvision.ogg")
+snd_freeze    = _load_sound("freeze breath.ogg")
+snd_punch     = _load_sound("punch.ogg")
+snd_gameover  = _load_sound("GameOver.ogg")
 
-_MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.mp3")
-_BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.mp3")
+_MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.ogg")
+_BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.ogg")
 _current_music = None  # 'menu' | 'bgm' | None
 
 
