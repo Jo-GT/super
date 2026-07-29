@@ -15,7 +15,9 @@
       "Bash(python -m json.tool)",
       "Bash(ffmpeg -version)",
       "Bash(python -c \"import os; print\\(repr\\(os.popen\\('ffmpeg -version'\\).read\\(\\)[:200]\\)\\)\")",
-      "Bash(cd \"c:\\\\Users\\\\JoGouveiaTomas\\\\Documents\\\\GitHub\\\\super\\\\Sounds\" && rm *.mp3 && ls -la)"
+      "Bash(cd \"c:\\\\Users\\\\JoGouveiaTomas\\\\Documents\\\\GitHub\\\\super\\\\Sounds\" && rm *.mp3 && ls -la)",
+      "Bash(curl -s \"https://api.github.com/repos/Jo-GT/super/actions/runs?per_page=6\")",
+      "Bash(curl -sI \"https://jo-gt.github.io/super/\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\JoGouveiaTomas\\Documents\\GitHub\\super"
