@@ -405,6 +405,7 @@ class Game:
 
     def __init__(self):
         self.city   = City(seed=42)
+        self.city.ensure_tiles()
         self.camera = Camera()
         self.pfs    = ParticleSystem()
         start_x, start_y = WORLD_W // 2, WORLD_H // 2
@@ -597,8 +598,7 @@ class Game:
 
     def draw(self):
         # World
-        self.city.draw_ground(screen, self.camera)
-        self.city.draw_buildings(screen, self.camera)
+        self.city.draw(screen, self.camera)
 
         # Events world elements
         for ev in self.events:
@@ -742,6 +742,10 @@ def draw_game_over(score, reputation):
 def start_game():
     """Begin a run, freeing the ~390MB of title frames first."""
     menu_video.release()
+    screen.fill(HUD_BG)
+    draw_text(screen, "Preparing Metropolis...", font_large, LGRAY,
+              SCREEN_W // 2, SCREEN_H // 2, center=True)
+    pygame.display.flip()
     play_bgm_music()
     return Game()
 
