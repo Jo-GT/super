@@ -150,6 +150,9 @@ class Superman:
 
         if self.speed_remaining > 0:
             self.speed_remaining -= dt
+            if self.speed_remaining <= 0:
+                self.speed_remaining = 0.0
+                self.speed_cd = self.SPEED_CD  # ran the full duration -> full cooldown
 
         if self._regen_pause > 0:
             self._regen_pause -= dt
@@ -247,8 +250,15 @@ class Superman:
         if self.speed_cd > 0 or self.speed_remaining > 0:
             return False
         self.speed_remaining = self.SPEED_DUR
-        self.speed_cd = self.SPEED_CD
         return True
+
+    def stop_speed(self):
+        # Toggled off early: only charge cooldown for the time actually used
+        if self.speed_remaining <= 0:
+            return
+        used = self.SPEED_DUR - self.speed_remaining
+        self.speed_cd = self.SPEED_CD * (used / self.SPEED_DUR)
+        self.speed_remaining = 0.0
 
     def _in_beam(self, px, py, tx, ty, threshold=28):
         ax, ay = self.head_pos
