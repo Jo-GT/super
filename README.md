@@ -59,3 +59,4 @@ Live at: https://jo-gt.github.io/super/
 | F / Right Click    | Freeze Breath (hold)              |
 | Q                  | Super Punch (dash to nearest enemy)|
 | Shift              | Super Speed                      |
+| ESC                | Pause (Resume / Exit Game)       |
