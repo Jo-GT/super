@@ -35,7 +35,11 @@
       "Bash(git reset *)",
       "Bash(python -m py_compile main.py entities.py events.py)",
       "Bash(python -m py_compile main.py entities.py events.py particles.py)",
-      "WebFetch(domain:jo-gt.github.io)"
+      "WebFetch(domain:jo-gt.github.io)",
+      "Bash(python -c \"import cv2\")",
+      "Bash(python -c \"import cv2; print\\('cv2 OK', cv2.__version__\\)\")",
+      "WebSearch",
+      "Bash(mkdir -p \"sprites/Environment/fire_frames\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\JoGouveiaTomas\\Documents\\GitHub\\super",

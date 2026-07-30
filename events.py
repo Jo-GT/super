@@ -5,13 +5,6 @@ import os
 from constants import *
 from entities import Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit, Civilian, Animal, Projectile, load_game_sprite
 
-try:
-    import cv2
-    import numpy as np
-    _HAS_CV2 = True
-except Exception:
-    _HAS_CV2 = False
-
 _SPRITES_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
 
 _tree_sprite = None
@@ -34,31 +27,25 @@ def _get_falling_sprite():
 
 
 def _load_fire_frames():
-    """Decode fire.gif's frames via cv2 (pygame/SDL_image only reads a GIF's
-    first frame). The gif has a flat white background, not real alpha, so we
-    key pure-white pixels to transparent by hand. Falls back to an empty list
-    (procedural flame circles keep working) if cv2 isn't available."""
+    """Load fire.gif's animation frames, pre-extracted to individual PNGs
+    (frame_00.png, frame_01.png, ...) with the flat white background already
+    keyed to transparent. Pre-extracted because pygame/SDL_image only reads a
+    GIF's first frame, and the previous approach of decoding fire.gif at
+    runtime via cv2 silently produced no frames in the browser build (opencv
+    has no WebAssembly build pygbag can load). Falls back to an empty list
+    (procedural flame circles keep working) if the PNGs are missing."""
     global _fire_frames
     if _fire_frames is not None:
         return _fire_frames
     frames = []
-    if _HAS_CV2:
-        try:
-            path = os.path.join(_SPRITES_ROOT, "Environment", "fire.gif")
-            cap = cv2.VideoCapture(path)
-            while True:
-                ok, frame = cap.read()
-                if not ok:
-                    break
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w = rgb.shape[:2]
-                rgba = np.dstack([rgb, np.full((h, w), 255, dtype=np.uint8)])
-                rgba[np.all(rgb >= 250, axis=2), 3] = 0
-                surf = pygame.image.frombuffer(rgba.tobytes(), (w, h), "RGBA").convert_alpha()
-                frames.append(pygame.transform.smoothscale(surf, (60, 90)))
-            cap.release()
-        except Exception:
-            frames = []
+    frames_dir = os.path.join(_SPRITES_ROOT, "Environment", "fire_frames")
+    try:
+        names = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(".png"))
+        for name in names:
+            surf = pygame.image.load(os.path.join(frames_dir, name)).convert_alpha()
+            frames.append(pygame.transform.smoothscale(surf, (60, 90)))
+    except Exception:
+        frames = []
     _fire_frames = frames
     return _fire_frames
 
