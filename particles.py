@@ -45,6 +45,7 @@ class Particle:
 class ParticleSystem:
     def __init__(self):
         self.particles: list[Particle] = []
+        self.rings: list[dict] = []
 
     def add(self, p: Particle):
         self.particles.append(p)
@@ -104,13 +105,34 @@ class ParticleSystem:
         self.burst(x, y, YELLOW_S, count=20, speed=5, size=6, life=0.4)
         self.burst(x, y, WHITE, count=10, speed=3, size=4, life=0.3)
 
+    def sonic_boom(self, x, y, color=CYAN):
+        self.rings.append({'x': x, 'y': y, 'age': 0.0, 'life': 0.45, 'color': color})
+        self.rings.append({'x': x, 'y': y, 'age': 0.08, 'life': 0.45, 'color': WHITE})
+        self.burst(x, y, color, count=24, speed=7, size=5, life=0.35)
+        self.burst(x, y, WHITE, count=14, speed=5, size=4, life=0.25)
+
     def update(self, dt):
         for p in self.particles:
             p.update(dt)
         self.particles = [p for p in self.particles if not p.dead]
+        for r in self.rings:
+            r['age'] += dt
+        self.rings = [r for r in self.rings if r['age'] < r['life']]
 
     def draw(self, surface, cam):
         vp = pygame.Rect(0, 0, SCREEN_W, SCREEN_H)
+        for r in self.rings:
+            t = max(0.0, r['age'] / r['life'])
+            radius = int(16 + 260 * t)
+            alpha = max(0, int(220 * (1 - t)))
+            if alpha <= 0:
+                continue
+            sx = int(r['x'] - cam.x)
+            sy = int(r['y'] - cam.y)
+            d = radius * 2 + 8
+            s = pygame.Surface((d, d), pygame.SRCALPHA)
+            pygame.draw.circle(s, (*r['color'][:3], alpha), (radius + 4, radius + 4), radius, 4)
+            surface.blit(s, (sx - radius - 4, sy - radius - 4))
         for p in self.particles:
             sx = int(p.x - cam.x)
             sy = int(p.y - cam.y)

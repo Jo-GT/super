@@ -2,6 +2,8 @@
 
 Superman: Guardian of Metropolis — a top-down action game built with pygame-ce.
 
+**Play in your browser:** https://jo-gt.github.io/super/
+
 ## Requirements
 
 - Python 3.10+
@@ -44,6 +46,8 @@ stop and re-run the `pygbag` command to rebuild — it does not hot-reload.
 
 Every push to `main` is built with pygbag and published to GitHub Pages by
 `.github/workflows/deploy-pages.yml` — no manual build/copy step needed.
+
+Live at: https://jo-gt.github.io/super/
 
 ## Controls
 
