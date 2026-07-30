@@ -4,6 +4,19 @@ import math
 from constants import *
 
 
+def _outline(surf, color, r, w):
+    """Border of r, as four filled bands.
+
+    draw.rect with a width clips the rect to the surface and outlines what's
+    left, which would draw a spurious edge along a tile seam for anything
+    straddling one. Fills clip cleanly.
+    """
+    pygame.draw.rect(surf, color, (r.x, r.y, r.w, w))
+    pygame.draw.rect(surf, color, (r.x, r.bottom - w, r.w, w))
+    pygame.draw.rect(surf, color, (r.x, r.y, w, r.h))
+    pygame.draw.rect(surf, color, (r.right - w, r.y, w, r.h))
+
+
 class Building:
     def __init__(self, x, y, w, h, color):
         self.rect = pygame.Rect(x, y, w, h)
@@ -16,31 +29,23 @@ class Building:
                 lit = random.random() > 0.45
                 self.windows.append((pygame.Rect(wx, wy, 6, 6), lit))
 
-    def draw(self, surface, cam):
-        sr = pygame.Rect(self.rect.x - cam.x, self.rect.y - cam.y, self.rect.w, self.rect.h)
-        vp = pygame.Rect(0, 0, SCREEN_W, SCREEN_H)
-        if not sr.colliderect(vp):
-            return
-        pygame.draw.rect(surface, self.color, sr)
-        top = (min(255, self.color[0] + 20), min(255, self.color[1] + 20), min(255, self.color[2] + 20))
-        pygame.draw.line(surface, top, sr.topleft, sr.topright, 2)
-        pygame.draw.line(surface, top, sr.topleft, sr.bottomleft, 1)
-        for wr, lit in self.windows:
-            wsr = pygame.Rect(wr.x - cam.x, wr.y - cam.y, wr.w, wr.h)
-            if vp.colliderect(wsr):
-                c = self.win_color if lit else (15, 20, 45)
-                pygame.draw.rect(surface, c, wsr)
-
 
 class City:
     ROAD_W = 44
     BLOCK_W = 210
     BLOCK_H = 175
+    TILE = 576          # 4608 / 576 = 8, so the world tiles with no remainder
+
+    # Keyed by seed, not per instance: a new City is built for every run, but
+    # the same seed always generates the same city, so rasterise it once.
+    _TILE_CACHE = {}
 
     def __init__(self, seed=7):
         random.seed(seed)
+        self.seed = seed
         self.buildings: list[Building] = []
         self.parks: list[pygame.Rect] = []
+        self._tiles = None
         self._generate()
 
     def _generate(self):
@@ -94,37 +99,87 @@ class City:
                 if fw > 12 and fh > 12:
                     self.buildings.append(Building(fx, fy, fw, fh, color()))
 
-    def draw_ground(self, surface, cam):
-        surface.fill(ROAD)
-        vp = pygame.Rect(cam.x - 10, cam.y - 10, SCREEN_W + 20, SCREEN_H + 20)
-        bw, bh, rw = self.BLOCK_W, self.BLOCK_H, self.ROAD_W
-        # sidewalk strips
-        x = 0
-        while x < WORLD_W:
-            sr = pygame.Rect(x - cam.x, -cam.y, rw, WORLD_H)
-            pygame.draw.rect(surface, SIDEWALK, sr.clip(pygame.Rect(0, 0, SCREEN_W, SCREEN_H)))
-            # road markings (center dashes)
-            cx2 = x + rw // 2 - cam.x
-            for dy in range(0, SCREEN_H + bh, bh):
-                pygame.draw.line(surface, ROAD_MRK, (cx2, dy), (cx2, dy + bh // 3), 2)
-            x += bw
-        y = 0
-        while y < WORLD_H:
-            sr = pygame.Rect(-cam.x, y - cam.y, WORLD_W, rw)
-            pygame.draw.rect(surface, SIDEWALK, sr.clip(pygame.Rect(0, 0, SCREEN_W, SCREEN_H)))
-            cy2 = y + rw // 2 - cam.y
-            for dx in range(0, SCREEN_W + bw, bw):
-                pygame.draw.line(surface, ROAD_MRK, (dx, cy2), (dx + bw // 3, cy2), 2)
-            y += bh
-        for park in self.parks:
-            pr = pygame.Rect(park.x - cam.x, park.y - cam.y, park.w, park.h)
-            if pr.colliderect(pygame.Rect(0, 0, SCREEN_W, SCREEN_H)):
-                pygame.draw.rect(surface, PARK, pr)
-                pygame.draw.rect(surface, (28, 75, 28), pr, 2)
+    # ─── RENDERING ────────────────────────────────────────────────────────────
 
-    def draw_buildings(self, surface, cam):
+    def ensure_tiles(self):
+        """Rasterise the city. Needs the display to be up, so not done in __init__."""
+        tiles = City._TILE_CACHE.get(self.seed)
+        if tiles is None:
+            tiles = City._TILE_CACHE[self.seed] = self._build_tiles()
+        self._tiles = tiles
+
+    def _build_tiles(self):
+        t = self.TILE
+        tiles = {}
+        for ty in range(WORLD_H // t):
+            for tx in range(WORLD_W // t):
+                surf = pygame.Surface((t, t))
+                self._render_region(surf, tx * t, ty * t)
+                tiles[(tx, ty)] = surf.convert()
+        return tiles
+
+    def _render_region(self, surf, ox, oy):
+        """Draw the world rect starting at (ox, oy) into surf.
+
+        Everything is positioned in world space, including the road dashes --
+        those used to be laid out relative to the screen, so they slid along
+        the roads as the camera moved.
+        """
+        w, h = surf.get_size()
+        clip = pygame.Rect(0, 0, w, h)
+        bw, bh, rw = self.BLOCK_W, self.BLOCK_H, self.ROAD_W
+        surf.fill(ROAD)
+
+        for x in range(0, WORLD_W, bw):
+            strip = pygame.Rect(x - ox, -oy, rw, WORLD_H)
+            if strip.colliderect(clip):
+                pygame.draw.rect(surf, SIDEWALK, strip.clip(clip))
+            cx = x + rw // 2 - ox
+            if -2 <= cx <= w + 2:
+                for wy in range(0, WORLD_H, bh):
+                    dy = wy - oy
+                    if -bh <= dy <= h:
+                        pygame.draw.line(surf, ROAD_MRK, (cx, dy), (cx, dy + bh // 3), 2)
+
+        for y in range(0, WORLD_H, bh):
+            strip = pygame.Rect(-ox, y - oy, WORLD_W, rw)
+            if strip.colliderect(clip):
+                pygame.draw.rect(surf, SIDEWALK, strip.clip(clip))
+            cy = y + rw // 2 - oy
+            if -2 <= cy <= h + 2:
+                for wx in range(0, WORLD_W, bw):
+                    dx = wx - ox
+                    if -bw <= dx <= w:
+                        pygame.draw.line(surf, ROAD_MRK, (dx, cy), (dx + bw // 3, cy), 2)
+
+        for park in self.parks:
+            pr = pygame.Rect(park.x - ox, park.y - oy, park.w, park.h)
+            if pr.colliderect(clip):
+                pygame.draw.rect(surf, PARK, pr)
+                _outline(surf, (28, 75, 28), pr, 2)
+
         for b in self.buildings:
-            b.draw(surface, cam)
+            br = pygame.Rect(b.rect.x - ox, b.rect.y - oy, b.rect.w, b.rect.h)
+            if not br.colliderect(clip):
+                continue
+            pygame.draw.rect(surf, b.color, br)
+            top = (min(255, b.color[0] + 20), min(255, b.color[1] + 20), min(255, b.color[2] + 20))
+            pygame.draw.line(surf, top, br.topleft, br.topright, 2)
+            pygame.draw.line(surf, top, br.topleft, br.bottomleft, 1)
+            for wr, lit in b.windows:
+                wsr = pygame.Rect(wr.x - ox, wr.y - oy, wr.w, wr.h)
+                if clip.colliderect(wsr):
+                    pygame.draw.rect(surf, b.win_color if lit else (15, 20, 45), wsr)
+
+    def draw(self, surface, cam):
+        t = self.TILE
+        # Truncate the camera once. pygame truncates float blit destinations
+        # toward zero, so a tile at -100.7 and its neighbour at 475.3 land 575
+        # apart instead of 576, leaving a seam that crawls as you fly.
+        cx, cy = int(cam.x), int(cam.y)
+        for ty in range(cy // t, (cy + SCREEN_H - 1) // t + 1):
+            for tx in range(cx // t, (cx + SCREEN_W - 1) // t + 1):
+                surface.blit(self._tiles[(tx, ty)], (tx * t - cx, ty * t - cy))
 
     def random_open_position(self):
         """Return a world position that is not inside a building."""

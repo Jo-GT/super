@@ -360,15 +360,58 @@ class MenuVideo:
         while self._t >= self._frame_dt and not self._done:
             self._t -= self._frame_dt
             if self._index + 1 >= len(self._frames):
-                self._done = True
+                self.release()
             else:
                 self._set_frame(self._index + 1)
+
+    def release(self):
+        """Free the intro frames, keeping the final "PRESS START" card.
+        Holds the last frame, not the current one, so quitting to the menu
+        mid-intro doesn't leave it stuck on a half-played frame."""
+        if self._frames:
+            self._set_frame(len(self._frames) - 1)
+        self._frames = []
+        self._index = 0
+        self._done = True
 
     def draw(self, surface):
         if self.surface is None:
             return False
         surface.blit(self.surface, (0, 0))
         return True
+
+
+# ─── EFFECT LAYER ─────────────────────────────────────────────────────────────
+# One reused layer for the beam and cone. A fresh screen-sized SRCALPHA surface
+# per effect per frame was the web build's worst cost -- alpha blitting has no
+# SIMD path in wasm, so it scales with area, not with what's drawn.
+
+_effect_layer = None
+
+
+def _bbox(points, margin):
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return pygame.Rect(int(min(xs)) - margin, int(min(ys)) - margin,
+                       int(max(xs) - min(xs)) + margin * 2,
+                       int(max(ys) - min(ys)) + margin * 2)
+
+
+def _effect_region(points, margin):
+    return _bbox(points, margin).clip(screen.get_rect())
+
+
+def _effect_begin(region):
+    """The shared layer, cleared over `region` only."""
+    global _effect_layer
+    if _effect_layer is None:
+        _effect_layer = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+    _effect_layer.fill((0, 0, 0, 0), region)
+    return _effect_layer
+
+
+def _effect_blit(layer, region):
+    screen.blit(layer, region.topleft, region)
 
 
 # ─── GAME ─────────────────────────────────────────────────────────────────────
@@ -380,6 +423,7 @@ class Game:
 
     def __init__(self):
         self.city   = City(seed=42)
+        self.city.ensure_tiles()
         self.camera = Camera()
         self.pfs    = ParticleSystem()
         start_x, start_y = WORLD_W // 2, WORLD_H // 2
@@ -572,8 +616,7 @@ class Game:
 
     def draw(self):
         # World
-        self.city.draw_ground(screen, self.camera)
-        self.city.draw_buildings(screen, self.camera)
+        self.city.draw(screen, self.camera)
 
         # Events world elements
         for ev in self.events:
@@ -592,28 +635,30 @@ class Game:
             ex = int(sx + math.cos(self.superman.facing) * Superman.HEAT_RANGE)
             ey = int(sy + math.sin(self.superman.facing) * Superman.HEAT_RANGE)
             # Beam (layered glow, drawn every frame the trigger is held for a solid long beam)
-            beam_surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            region = _effect_region([(sx, sy), (ex, ey)], 10)   # 10 clears the 16px line
+            beam_surf = _effect_begin(region)
             pygame.draw.line(beam_surf, (255, 255, 220, 90), (sx, sy), (ex, ey), 16)
             pygame.draw.line(beam_surf, (*FIRE_WARM, 160), (sx, sy), (ex, ey), 9)
             pygame.draw.line(beam_surf, (*FIRE_HOT, 230), (sx, sy), (ex, ey), 4)
             pygame.draw.line(beam_surf, (255, 255, 255, 255), (sx, sy), (ex, ey), 2)
-            screen.blit(beam_surf, (0, 0))
+            _effect_blit(beam_surf, region)
 
         # Freeze breath cone (drawn continuously while held, exits the head)
         if self.superman.freeze_active:
             fx = int(self.superman.head_pos[0] - self.camera.x)
             fy = int(self.superman.head_pos[1] - self.camera.y)
             angle = self.superman.facing
-            cone_surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
             pts = [(fx, fy)]
             reach = Superman.FREEZE_RANGE
             for da in range(-45, 46, 5):
                 a = angle + math.radians(da)
                 pts.append((fx + math.cos(a) * reach, fy + math.sin(a) * reach))
+            region = _effect_region(pts, 4)   # 4 covers the 2px outline
+            cone_surf = _effect_begin(region)
             if len(pts) > 2:
                 pygame.draw.polygon(cone_surf, (*ICE, 90), pts)
                 pygame.draw.polygon(cone_surf, (*CYAN, 60), pts, 2)
-            screen.blit(cone_surf, (0, 0))
+            _effect_blit(cone_surf, region)
 
         # Flash
         self.flash.draw(screen)
@@ -741,6 +786,17 @@ def draw_game_over(score, reputation):
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
+def start_game():
+    """Begin a run, freeing the ~390MB of title frames first."""
+    menu_video.release()
+    screen.fill(HUD_BG)
+    draw_text(screen, "Preparing Metropolis...", font_large, LGRAY,
+              SCREEN_W // 2, SCREEN_H // 2, center=True)
+    pygame.display.flip()
+    play_bgm_music()
+    return Game()
+
+
 async def main():
     state = 'menu'
     game: Game | None = None
@@ -761,18 +817,16 @@ async def main():
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        game = Game()
+                        game = start_game()
                         state = 'play'
-                        play_bgm_music()
                     if event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         return
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     # A click anywhere begins, which is what the title card's
                     # baked-in "PRESS START" has always implied.
-                    game = Game()
+                    game = start_game()
                     state = 'play'
-                    play_bgm_music()
             menu_video.update(dt)
             draw_menu()
 
@@ -827,9 +881,8 @@ async def main():
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        game = Game()
+                        game = start_game()
                         state = 'play'
-                        play_bgm_music()
                     if event.key == pygame.K_ESCAPE:
                         play_menu_music()
                         state = 'menu'
