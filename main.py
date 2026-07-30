@@ -353,6 +353,39 @@ class MenuVideo:
         return True
 
 
+# ─── EFFECT LAYER ─────────────────────────────────────────────────────────────
+# One reused layer for the beam and cone. A fresh screen-sized SRCALPHA surface
+# per effect per frame was the web build's worst cost -- alpha blitting has no
+# SIMD path in wasm, so it scales with area, not with what's drawn.
+
+_effect_layer = None
+
+
+def _bbox(points, margin):
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    return pygame.Rect(int(min(xs)) - margin, int(min(ys)) - margin,
+                       int(max(xs) - min(xs)) + margin * 2,
+                       int(max(ys) - min(ys)) + margin * 2)
+
+
+def _effect_region(points, margin):
+    return _bbox(points, margin).clip(screen.get_rect())
+
+
+def _effect_begin(region):
+    """The shared layer, cleared over `region` only."""
+    global _effect_layer
+    if _effect_layer is None:
+        _effect_layer = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+    _effect_layer.fill((0, 0, 0, 0), region)
+    return _effect_layer
+
+
+def _effect_blit(layer, region):
+    screen.blit(layer, region.topleft, region)
+
+
 # ─── GAME ─────────────────────────────────────────────────────────────────────
 
 class Game:
@@ -574,28 +607,30 @@ class Game:
             ex = int(sx + math.cos(self.superman.facing) * Superman.HEAT_RANGE)
             ey = int(sy + math.sin(self.superman.facing) * Superman.HEAT_RANGE)
             # Beam (layered glow, drawn every frame the trigger is held for a solid long beam)
-            beam_surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            region = _effect_region([(sx, sy), (ex, ey)], 10)   # 10 clears the 16px line
+            beam_surf = _effect_begin(region)
             pygame.draw.line(beam_surf, (255, 255, 220, 90), (sx, sy), (ex, ey), 16)
             pygame.draw.line(beam_surf, (*FIRE_WARM, 160), (sx, sy), (ex, ey), 9)
             pygame.draw.line(beam_surf, (*FIRE_HOT, 230), (sx, sy), (ex, ey), 4)
             pygame.draw.line(beam_surf, (255, 255, 255, 255), (sx, sy), (ex, ey), 2)
-            screen.blit(beam_surf, (0, 0))
+            _effect_blit(beam_surf, region)
 
         # Freeze breath cone (drawn continuously while held, exits the head)
         if self.superman.freeze_active:
             fx = int(self.superman.head_pos[0] - self.camera.x)
             fy = int(self.superman.head_pos[1] - self.camera.y)
             angle = self.superman.facing
-            cone_surf = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
             pts = [(fx, fy)]
             reach = Superman.FREEZE_RANGE
             for da in range(-45, 46, 5):
                 a = angle + math.radians(da)
                 pts.append((fx + math.cos(a) * reach, fy + math.sin(a) * reach))
+            region = _effect_region(pts, 4)   # 4 covers the 2px outline
+            cone_surf = _effect_begin(region)
             if len(pts) > 2:
                 pygame.draw.polygon(cone_surf, (*ICE, 90), pts)
                 pygame.draw.polygon(cone_surf, (*CYAN, 60), pts, 2)
-            screen.blit(cone_surf, (0, 0))
+            _effect_blit(cone_surf, region)
 
         # Flash
         self.flash.draw(screen)
