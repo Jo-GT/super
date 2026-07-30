@@ -380,6 +380,12 @@ class Game:
         self._freeze_playing = False
         self._shift_prev = False
 
+        # Mouse buttons are read as a level, not an edge, so the click that
+        # started the game is still physically down for the first few frames
+        # and would instantly fire heat vision. Mask any button already held at
+        # construction until it has been released once.
+        self._mouse_gate = [bool(b) for b in pygame.mouse.get_pressed()]
+
         # Spawn initial events
         for _ in range(3):
             self._try_spawn_event()
@@ -400,7 +406,14 @@ class Game:
 
     def handle_input(self, dt):
         keys = pygame.key.get_pressed()
-        mouse_buttons = pygame.mouse.get_pressed()
+        mouse_buttons = list(pygame.mouse.get_pressed())
+        for i, gated in enumerate(self._mouse_gate):
+            if not gated:
+                continue
+            if mouse_buttons[i]:
+                mouse_buttons[i] = False     # still held from the menu click
+            else:
+                self._mouse_gate[i] = False  # released: hand control back
         mx, my = pygame.mouse.get_pos()
         mouse_world = (mx + self.camera.x, my + self.camera.y)
 
@@ -706,6 +719,12 @@ async def main():
                     if event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         return
+                elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # A click anywhere begins, which is what the title card's
+                    # baked-in "PRESS START" has always implied.
+                    game = Game()
+                    state = 'play'
+                    play_bgm_music()
             menu_video.update(dt)
             draw_menu()
 
