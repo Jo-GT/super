@@ -33,7 +33,9 @@
       "Bash(curl -sL \"https://api.github.com/repos/Jo-GT/super/actions/jobs/90576410003/logs\" -o /tmp/joblog.txt -w \"HTTP %{http_code}\\\\n\")",
       "Bash(grep -v \"^$\")",
       "Bash(git reset *)",
-      "Bash(python -m py_compile main.py entities.py events.py)"
+      "Bash(python -m py_compile main.py entities.py events.py)",
+      "Bash(python -m py_compile main.py entities.py events.py particles.py)",
+      "WebFetch(domain:jo-gt.github.io)"
     ],
     "additionalDirectories": [
       "C:\\Users\\JoGouveiaTomas\\Documents\\GitHub\\super",

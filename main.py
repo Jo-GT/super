@@ -446,8 +446,11 @@ class Game:
         if shift_down and not self._shift_prev:
             if s.speed_remaining > 0:
                 s.stop_speed()
-            elif s.try_speed() and snd_sprint:
-                snd_sprint.play()
+            elif s.try_speed():
+                self.pfs.sonic_boom(s.x, s.y)
+                self.flash.trigger(CYAN, 70)
+                if snd_sprint:
+                    snd_sprint.play()
         self._shift_prev = shift_down
 
         s.update(dt, keys, mouse_world)
