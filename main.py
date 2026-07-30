@@ -342,9 +342,19 @@ class MenuVideo:
         while self._t >= self._frame_dt and not self._done:
             self._t -= self._frame_dt
             if self._index + 1 >= len(self._frames):
-                self._done = True
+                self.release()
             else:
                 self._set_frame(self._index + 1)
+
+    def release(self):
+        """Free the intro frames, keeping the final "PRESS START" card.
+        Holds the last frame, not the current one, so quitting to the menu
+        mid-intro doesn't leave it stuck on a half-played frame."""
+        if self._frames:
+            self._set_frame(len(self._frames) - 1)
+        self._frames = []
+        self._index = 0
+        self._done = True
 
     def draw(self, surface):
         if self.surface is None:
@@ -729,6 +739,13 @@ def draw_game_over(score, reputation):
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
 
+def start_game():
+    """Begin a run, freeing the ~390MB of title frames first."""
+    menu_video.release()
+    play_bgm_music()
+    return Game()
+
+
 async def main():
     state = 'menu'
     game: Game | None = None
@@ -748,18 +765,16 @@ async def main():
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        game = Game()
+                        game = start_game()
                         state = 'play'
-                        play_bgm_music()
                     if event.key == pygame.K_ESCAPE:
                         pygame.quit()
                         return
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     # A click anywhere begins, which is what the title card's
                     # baked-in "PRESS START" has always implied.
-                    game = Game()
+                    game = start_game()
                     state = 'play'
-                    play_bgm_music()
             menu_video.update(dt)
             draw_menu()
 
@@ -784,9 +799,8 @@ async def main():
             for event in events:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_RETURN:
-                        game = Game()
+                        game = start_game()
                         state = 'play'
-                        play_bgm_music()
                     if event.key == pygame.K_ESCAPE:
                         play_menu_music()
                         state = 'menu'
