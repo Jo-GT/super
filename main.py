@@ -378,6 +378,7 @@ class Game:
         self._wind_playing = False
         self._heat_playing = False
         self._freeze_playing = False
+        self._shift_prev = False
 
         # Spawn initial events
         for _ in range(3):
@@ -440,10 +441,14 @@ class Game:
                 if snd_punch:
                     snd_punch.play()
 
-        # Speed: Shift
-        if keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]:
-            if s.try_speed() and snd_sprint:
+        # Speed: Shift (toggle on/off)
+        shift_down = bool(keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
+        if shift_down and not self._shift_prev:
+            if s.speed_remaining > 0:
+                s.stop_speed()
+            elif s.try_speed() and snd_sprint:
                 snd_sprint.play()
+        self._shift_prev = shift_down
 
         s.update(dt, keys, mouse_world)
 
