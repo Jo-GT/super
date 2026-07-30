@@ -539,6 +539,7 @@ class FloodEvent(BaseEvent):
         ]
         self.frozen_tiles: list[tuple] = []
         self._t = 0.0
+        self.frozen = False
 
     def on_activate(self, superman):
         pass
@@ -549,12 +550,13 @@ class FloodEvent(BaseEvent):
         if not self.active:
             return
 
-        # Water rises (freeze breath held near animals slows the flood)
-        freeze_factor = 0.2 if any(
-            math.hypot(superman.x - a.x, superman.y - a.y) < 300 and superman.freeze_active
+        # Water rises, unless freeze breath is held near the animals — then it fully freezes in place
+        self.frozen = superman.freeze_active and any(
+            math.hypot(superman.x - a.x, superman.y - a.y) < 300
             for a in self.animals
-        ) else 1.0
-        self.water_level += 0.08 * freeze_factor * dt
+        )
+        if not self.frozen:
+            self.water_level += 0.08 * dt
         self.timer -= dt
 
         for a in self.animals:
@@ -577,12 +579,20 @@ class FloodEvent(BaseEvent):
         wh = int(200 * self.water_level)
         if wh > 0:
             ws = pygame.Surface((300, wh + 10), pygame.SRCALPHA)
-            ws.fill((*WATER_C, 130))
+            ws.fill((*ICE, 160) if self.frozen else (*WATER_C, 130))
             surface.blit(ws, (sx - 150, sy + 80 - wh))
-            # Waves
-            for i in range(3):
-                wave_x = int((self._t * 40 + i * 50) % 300)
-                pygame.draw.arc(surface, (*ICE, 180), (sx - 150 + wave_x - 20, sy + 82 - wh, 40, 10), 0, math.pi, 2)
+            if self.frozen:
+                # Frozen crust: static jagged ice cracks instead of waves
+                for i in range(5):
+                    cx = sx - 150 + i * 70 + 20
+                    cy = sy + 80 - wh + 4
+                    pygame.draw.line(surface, (*WHITE, 200), (cx, cy), (cx + 18, cy + 10), 2)
+                    pygame.draw.line(surface, (*WHITE, 200), (cx + 18, cy + 10), (cx + 6, cy + 20), 2)
+            else:
+                # Waves
+                for i in range(3):
+                    wave_x = int((self._t * 40 + i * 50) % 300)
+                    pygame.draw.arc(surface, (*ICE, 180), (sx - 150 + wave_x - 20, sy + 82 - wh, 40, 10), 0, math.pi, 2)
         # Animals
         for a in self.animals:
             a.draw(surface, cam)
