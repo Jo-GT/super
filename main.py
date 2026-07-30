@@ -65,6 +65,8 @@ snd_gameover  = _load_sound("GameOver.ogg")
 
 _MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.ogg")
 _BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.ogg")
+_BGM_VOLUME      = 0.55
+_PAUSE_DUCK      = 0.2   # fraction of normal volume while the pause menu is up
 _current_music = None  # 'menu' | 'bgm' | None
 
 
@@ -86,7 +88,23 @@ def play_menu_music():
 
 
 def play_bgm_music():
-    _play_music(_BGM_MUSIC_PATH, 0.55, 'bgm')
+    _play_music(_BGM_MUSIC_PATH, _BGM_VOLUME, 'bgm')
+
+
+def duck_music():
+    """Drop the music under the pause menu. _play_music won't reset the volume
+    on the way back out (same tag = no-op), so resuming must unduck explicitly."""
+    try:
+        pygame.mixer.music.set_volume(_BGM_VOLUME * _PAUSE_DUCK)
+    except Exception:
+        pass
+
+
+def unduck_music():
+    try:
+        pygame.mixer.music.set_volume(_BGM_VOLUME)
+    except Exception:
+        pass
 
 
 def stop_music():
@@ -665,6 +683,35 @@ class Game:
 
 menu_video = MenuVideo(_TITLE_FRAMES_DIR, _TITLE_FRAME_FPS)
 
+# Held for the whole run rather than rebuilt per frame — a full-screen SRCALPHA
+# allocation every frame is the expensive path (see ScreenFlash).
+_pause_dim = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+_pause_dim.fill((0, 0, 0, 160))
+
+PAUSE_ITEMS = ("Resume", "Exit Game")
+
+
+def draw_pause(selected):
+    """Menu over a dimmed still of the game. The caller draws the world first
+    and does the flip, so this only lays the dim and the text on top."""
+    screen.blit(_pause_dim, (0, 0))
+    t = pygame.time.get_ticks() / 1000
+    alpha = int(180 + 75 * abs(math.sin(t * 2)))
+
+    draw_text(screen, "PAUSED", font_xl, GOLD, SCREEN_W // 2, 220, center=True)
+    for i, label in enumerate(PAUSE_ITEMS):
+        y = 330 + i * 56
+        if i == selected:
+            draw_text(screen, f"> {label} <", font_large, (*GOLD[:3], alpha),
+                      SCREEN_W // 2, y, center=True)
+        else:
+            draw_text(screen, label, font_large, LGRAY, SCREEN_W // 2, y, center=True)
+
+    # Sits under the items rather than at the foot of the screen — the HUD's
+    # power-icon row lives down there and the two overlap illegibly.
+    draw_text(screen, "UP/DOWN: Select   ENTER: Confirm   ESC: Resume",
+              font_small, LGRAY, SCREEN_W // 2, 470, center=True)
+
 
 def draw_menu():
     t = pygame.time.get_ticks() / 1000
@@ -753,6 +800,7 @@ def start_game():
 async def main():
     state = 'menu'
     game: Game | None = None
+    pause_sel = 0
     play_menu_music()
 
     while True:
@@ -785,9 +833,13 @@ async def main():
         elif state == 'play':
             escape = any(e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE for e in events)
             if escape:
+                # stop_sounds kills the looping wind/heat/freeze SFX, which would
+                # otherwise drone on under the menu — polling stops, playback doesn't.
+                # Their flags reset, so resuming re-triggers whatever is still held.
                 game.stop_sounds()
-                play_menu_music()
-                state = 'menu'
+                duck_music()
+                pause_sel = 0
+                state = 'pause'
             elif not game.superman.alive:
                 game.stop_sounds()
                 stop_music()
@@ -797,6 +849,32 @@ async def main():
             else:
                 game.update(dt)
                 game.draw()
+                pygame.display.flip()
+
+        elif state == 'pause':
+            # Not calling game.update() is the whole pause — every gameplay timer
+            # is dt-threaded, so they all stop on their own.
+            for event in events:
+                if event.type != pygame.KEYDOWN:
+                    continue
+                if event.key == pygame.K_ESCAPE:
+                    unduck_music()
+                    state = 'play'
+                elif event.key in (pygame.K_UP, pygame.K_w):
+                    pause_sel = (pause_sel - 1) % len(PAUSE_ITEMS)
+                elif event.key in (pygame.K_DOWN, pygame.K_s):
+                    pause_sel = (pause_sel + 1) % len(PAUSE_ITEMS)
+                elif event.key == pygame.K_RETURN:
+                    if PAUSE_ITEMS[pause_sel] == "Resume":
+                        unduck_music()
+                        state = 'play'
+                    else:
+                        unduck_music()
+                        play_menu_music()
+                        state = 'menu'
+            if state == 'pause':
+                game.draw()
+                draw_pause(pause_sel)
                 pygame.display.flip()
 
         elif state == 'gameover':
