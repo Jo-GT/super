@@ -72,9 +72,10 @@ snd_gameover  = _load_sound("GameOver.ogg")
 # three clips: an intro, a body that loops seamlessly, and a tail-off played
 # on release.
 #
-# Two intros are available. "full" opens with the quiet charge-up before the
-# swell; "swell" skips the charge and leads with the swell itself.
-HEAT_INTRO_VARIANT = "swell"   # "full" | "swell"
+# Three intros are available. "full" opens with the quiet charge-up before the
+# swell; "swell" skips the charge and leads with the swell itself; "punch"
+# skips the ramp too and opens on the blast already at full volume.
+HEAT_INTRO_VARIANT = "punch"   # "full" | "swell" | "punch"
 
 snd_heat_intro = _load_sound(f"heatvision-intro-{HEAT_INTRO_VARIANT}.ogg")
 snd_heat_loop  = _load_sound("heatvision-loop.ogg")

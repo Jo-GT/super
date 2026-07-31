@@ -6,8 +6,9 @@ fade-out. Heat vision is held down, though, so looping that whole clip replayed
 the swell and the fade every 4 seconds instead of sustaining. Instead it is cut
 into an intro, a body that loops, and a tail-off played on release.
 
-Two intros are produced: "full" keeps the quiet charge-up, "swell" starts at the
-swell. main.py picks between them with HEAT_INTRO_VARIANT.
+Three intros are produced: "full" keeps the quiet charge-up, "swell" starts at
+the swell, "punch" skips the ramp entirely and opens on the blast landing.
+main.py picks between them with HEAT_INTRO_VARIANT.
 
 Two details matter and are easy to get wrong:
 
@@ -38,6 +39,7 @@ SRC = SOUNDS / "heatvision.ogg"
 
 CHARGE_START = 0.000    # quiet charge-up begins
 SWELL_START = 0.180     # ramp up to the blast begins
+PUNCH_START = 0.360     # the blast lands, at full volume - no ramp before it
 LOOP_START = 1.066      # see below; the intro runs to here
 LOOP_END = 3.070        # chosen by correlation against LOOP_START
 TAIL_START = 3.575      # the blast begins decaying
@@ -54,6 +56,7 @@ TAIL_END = 4.020
 HANDOVER = 0.120        # intro fade-out, mirrored by HEAT_LOOP_LEAD_IN in main.py
 WRAP = 0.020            # loop wrap-around blend
 TAIL_FADE_IN = 0.025    # mirrors the loop's fadeout on release
+PUNCH_FADE_IN = 0.005   # just enough to stop the punch intro clicking
 
 
 def decode(path: Path) -> np.ndarray:
@@ -81,13 +84,19 @@ def encode(samples: np.ndarray, path: Path) -> None:
           f"  {path.stat().st_size:>7,} bytes")
 
 
-def build_intro(x: np.ndarray, start: float, name: str) -> None:
+def build_intro(x: np.ndarray, start: float, name: str, fade_in: float = 0.0) -> None:
     """Intro, running on into the blast and fading out over the handover.
 
     pygame fades the body in linearly, so this fades out as sqrt(1 - t**2):
     the two then sum to constant power for arbitrary relative phase.
+
+    fade_in is for intros that open mid-waveform at volume rather than out of
+    silence - a few ms, too short to hear as a fade but enough to stop the click.
     """
     clip = x[int(start * SR):int(LOOP_START * SR)].copy()
+    if fade_in:
+        f = int(fade_in * SR)
+        clip[:f] *= np.linspace(0, 1, f, endpoint=False)[:, None]
     d = int(HANDOVER * SR)
     t = np.linspace(0, 1, d, endpoint=False)[:, None]
     clip[-d:] *= np.sqrt(1 - t ** 2)
@@ -118,6 +127,7 @@ def main() -> None:
     print(f"{SRC.name}: {len(x)/SR:.3f}s")
     build_intro(x, CHARGE_START, "heatvision-intro-full.ogg")
     build_intro(x, SWELL_START, "heatvision-intro-swell.ogg")
+    build_intro(x, PUNCH_START, "heatvision-intro-punch.ogg", fade_in=PUNCH_FADE_IN)
     build_loop(x)
     build_tail(x)
 
