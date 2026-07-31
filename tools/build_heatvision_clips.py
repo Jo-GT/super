@@ -41,7 +41,8 @@ CHARGE_START = 0.000    # quiet charge-up begins
 SWELL_START = 0.180     # ramp up to the blast begins
 PUNCH_START = 0.360     # the blast lands, at full volume - no ramp before it
 LOOP_START = 1.066      # see below; the intro runs to here
-LOOP_END = 3.070        # chosen by correlation against LOOP_START
+LOOP_END = 2.056330     # chosen by correlation against LOOP_START
+CONTACT_END = 3.069000  # ditto, against LOOP_END
 TAIL_START = 3.575      # the blast begins decaying
 TAIL_END = 4.020
 
@@ -52,6 +53,12 @@ TAIL_END = 4.020
 # and tail-off coming back round even though the splice itself is seamless.
 # 1.066-3.070s is the flat middle of the blast, and its loudest moment falls
 # mid-loop rather than on the seam, so nothing draws the ear to the wrap.
+#
+# That middle is split in two at LOOP_END. The first half is the beam's idle
+# hum; the second has a different character and is cut as a separate loop,
+# heatvision-contact.ogg, held back for a beam-hitting-something sound. Nothing
+# plays it yet. The two are contiguous, and each is independently phase-aligned
+# so either can loop on its own.
 
 HANDOVER = 0.120        # intro fade-out, mirrored by HEAT_LOOP_LEAD_IN in main.py
 WRAP = 0.020            # loop wrap-around blend
@@ -103,13 +110,19 @@ def build_intro(x: np.ndarray, start: float, name: str, fade_in: float = 0.0) ->
     encode(clip, SOUNDS / name)
 
 
-def build_loop(x: np.ndarray) -> None:
-    s, e, d = int(LOOP_START * SR), int(LOOP_END * SR), int(WRAP * SR)
+def build_loop(x: np.ndarray, start: float, end: float, name: str) -> None:
+    """A seamless loop of [start, end).
+
+    The last WRAP seconds are blended over the WRAP seconds leading into start,
+    which keeps the phase alignment the endpoints were chosen for. Linear, not
+    equal-power: the two are correlated and in phase, so they add coherently.
+    """
+    s, e, d = int(start * SR), int(end * SR), int(WRAP * SR)
     body = x[s - d:e - d].copy()
     wrap = x[e - d:e]                 # phase-aligned with body[:d]
     t = np.linspace(0, 1, d, endpoint=False)[:, None]
     body[:d] = wrap * (1 - t) + body[:d] * t
-    encode(body, SOUNDS / "heatvision-loop.ogg")
+    encode(body, SOUNDS / name)
 
 
 def build_tail(x: np.ndarray) -> None:
@@ -128,7 +141,8 @@ def main() -> None:
     build_intro(x, CHARGE_START, "heatvision-intro-full.ogg")
     build_intro(x, SWELL_START, "heatvision-intro-swell.ogg")
     build_intro(x, PUNCH_START, "heatvision-intro-punch.ogg", fade_in=PUNCH_FADE_IN)
-    build_loop(x)
+    build_loop(x, LOOP_START, LOOP_END, "heatvision-loop.ogg")
+    build_loop(x, LOOP_END, CONTACT_END, "heatvision-contact.ogg")
     build_tail(x)
 
 
