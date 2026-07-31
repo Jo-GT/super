@@ -29,16 +29,33 @@ class MenuVideo:
     available. Falls back to no-op if the frames folder is missing."""
 
     def __init__(self, frames_dir, frame_fps):
+        self._frames_dir = frames_dir
         self._frames = []
         self._index = 0
         self._t = 0.0
         self._frame_dt = 1.0 / frame_fps
         self._done = False
+        self._loaded = False
         self.surface = None
+
+    def _ensure_loaded(self):
+        """Load on first use, not in __init__.
+
+        The frames are .convert()ed, which needs a display format to have been
+        set, but this class is instantiated at module import - before main.py
+        calls pygame.display.set_mode(). Loading eagerly meant every convert()
+        raised, the except below swallowed it, and the title screen silently
+        fell back to the procedural skyline with nothing logged.
+        """
+        if self._loaded or self._done:
+            return
+        self._loaded = True
         try:
-            names = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(".jpg"))
+            names = sorted(f for f in os.listdir(self._frames_dir)
+                           if f.lower().endswith(".jpg"))
             for name in names:
-                self._frames.append(pygame.image.load(os.path.join(frames_dir, name)).convert())
+                self._frames.append(
+                    pygame.image.load(os.path.join(self._frames_dir, name)).convert())
         except Exception:
             self._frames = []
         if self._frames:
@@ -52,6 +69,7 @@ class MenuVideo:
         self.surface = frame
 
     def update(self, dt):
+        self._ensure_loaded()
         if not self._frames or self._done:
             return
         self._t += dt
@@ -66,6 +84,7 @@ class MenuVideo:
         """Free the intro frames, keeping the final "PRESS START" card.
         Holds the last frame, not the current one, so quitting to the menu
         mid-intro doesn't leave it stuck on a half-played frame."""
+        self._ensure_loaded()
         if self._frames:
             self._set_frame(len(self._frames) - 1)
         self._frames = []
@@ -73,6 +92,7 @@ class MenuVideo:
         self._done = True
 
     def draw(self, surface):
+        self._ensure_loaded()
         if self.surface is None:
             return False
         surface.blit(self.surface, (0, 0))
