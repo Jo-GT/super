@@ -92,6 +92,12 @@ snd_heat_sizzle = _load_sound("heatvision-sizzle.ogg")
 # across enemies flickers the layer on and off several times a second.
 HEAT_CONTACT_HOLD = 0.20    # seconds to keep the sizzle up after the last hit
 HEAT_SIZZLE_FADE = 60       # ms, in and out
+HEAT_SIZZLE_VOLUME = 0.5    # the clip is built hot; balance it against the beam
+                            # here rather than baking it in, so the asset keeps
+                            # its headroom and this stays easy to nudge.
+
+if snd_heat_sizzle:
+    snd_heat_sizzle.set_volume(HEAT_SIZZLE_VOLUME)
 
 # The intro clips run on into the blast and fade out over their final
 # HEAT_LOOP_LEAD_IN seconds, so the looping body is faded in underneath them
