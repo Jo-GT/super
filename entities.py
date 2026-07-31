@@ -164,7 +164,7 @@ class Superman:
     PUNCH_CD   = 1.8
     SPEED_CD   = 14.0
     SPEED_DUR  = 4.0
-    XRAY_CD    = 18.0
+    XRAY_CD    = 9.0
     XRAY_DUR   = 5.0
     PUNCH_RANGE = 450
     HEAT_RANGE  = 520
