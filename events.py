@@ -3,7 +3,8 @@ import math
 import random
 import os
 from constants import *
-from entities import Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit, Civilian, Animal, Projectile, load_game_sprite
+from entities import (Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit,
+                      Civilian, BuriedCivilian, Animal, Projectile, load_game_sprite)
 
 _SPRITES_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
 
@@ -596,6 +597,311 @@ class FloodEvent(BaseEvent):
             pygame.draw.circle(surface, GREEN, (sx + dx, sy + dy), 3)
 
 
+# ─── COLLAPSED BUILDING (RUBBLE SEARCH) ───────────────────────────────────────
+
+class RubbleEvent(BaseEvent):
+    INNER_RADIUS = 260
+    TIMER        = 70.0
+    FIELD_W, FIELD_H = 300, 180
+
+    def __init__(self, x, y):
+        super().__init__(x, y, EventType.RESCUE_RUBBLE)
+        self.timer = self.TIMER
+
+        # Slab quads are rotated once here rather than per frame: unlike the
+        # runaway car these never move, so there's nothing to recompute.
+        self.slabs = []
+        for _ in range(18):
+            ox = random.uniform(-self.FIELD_W / 2, self.FIELD_W / 2)
+            oy = random.uniform(-self.FIELD_H / 2, self.FIELD_H / 2)
+            w = random.uniform(26, 58)
+            h = random.uniform(12, 26)
+            a = random.uniform(0, math.pi)
+            c, s = math.cos(a), math.sin(a)
+            pts = [(ox + dx * c - dy * s, oy + dx * s + dy * c)
+                   for dx, dy in ((-w / 2, -h / 2), (w / 2, -h / 2),
+                                  (w / 2, h / 2), (-w / 2, h / 2))]
+            shade = random.choice([(92, 90, 86), (78, 76, 72), (104, 101, 96), (66, 64, 60)])
+            self.slabs.append((pts, shade))
+
+        self.rebar = []
+        for _ in range(6):
+            rx = random.uniform(-self.FIELD_W / 2, self.FIELD_W / 2)
+            ry = random.uniform(-self.FIELD_H / 2, self.FIELD_H / 2)
+            a = random.uniform(0, math.pi * 2)
+            self.rebar.append((rx, ry, rx + math.cos(a) * 22, ry + math.sin(a) * 22))
+
+        # Spread the victims out so the rescue run is a route, not one hover
+        self.victims = []
+        while len(self.victims) < random.randint(4, 5):
+            vx = x + random.uniform(-self.FIELD_W / 2 + 20, self.FIELD_W / 2 - 20)
+            vy = y + random.uniform(-self.FIELD_H / 2 + 20, self.FIELD_H / 2 - 20)
+            if all(math.hypot(vx - v.x, vy - v.y) > 62 for v in self.victims):
+                self.victims.append(BuriedCivilian(vx, vy))
+
+    def on_activate(self, superman):
+        pass
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if not self.active:
+            return
+        self.timer -= dt
+
+        for v in self.victims:
+            if not v.revealed and superman.xray_reveals(v.x, v.y):
+                v.revealed = True
+                particles.burst(v.x, v.y, XRAY_C, count=12, speed=2.5, size=4, life=0.5)
+            v.update(dt, superman)
+            if v.saved and not v._dug:
+                v._dug = True
+                particles.burst(v.x, v.y, GRAY, count=16, speed=3, size=5, life=0.7, gravity=0.05)
+                particles.burst(v.x, v.y, YELLOW_S, count=8, speed=3.5, size=4, life=0.4)
+
+        # elif, not a second if: main.py checks complete and failed with two
+        # independent ifs, so setting both in one frame pays out and penalises.
+        if all(v.saved for v in self.victims):
+            self.complete = True
+        elif self.timer <= 0:
+            self.failed = True
+
+    def get_ui_text(self):
+        found = sum(1 for v in self.victims if v.revealed)
+        out = sum(1 for v in self.victims if v.saved)
+        n = len(self.victims)
+        if found < n:
+            return self.name, f"{found}/{n} located, {out}/{n} out  -  X=X-Ray to scan the rubble"
+        return self.name, f"All {n} located  -  {out}/{n} pulled out. Fly to each one!"
+
+    def draw(self, surface, cam):
+        if self.complete or self.failed:
+            return
+        sx = int(self.x - cam.x)
+        sy = int(self.y - cam.y)
+
+        # Dust apron under the pile
+        aw, ah = self.FIELD_W + 60, self.FIELD_H + 40
+        apron = pygame.Surface((aw, ah), pygame.SRCALPHA)
+        pygame.draw.ellipse(apron, (54, 50, 46, 120), apron.get_rect())
+        surface.blit(apron, (sx - aw // 2, sy - ah // 2))
+
+        for pts, shade in self.slabs:
+            spts = [(sx + px, sy + py) for px, py in pts]
+            pygame.draw.polygon(surface, shade, spts)
+            dark = (max(0, shade[0] - 26), max(0, shade[1] - 26), max(0, shade[2] - 26))
+            pygame.draw.polygon(surface, dark, spts, 2)
+        for rx, ry, rx2, ry2 in self.rebar:
+            pygame.draw.line(surface, (120, 76, 48), (sx + rx, sy + ry), (sx + rx2, sy + ry2), 2)
+
+        for v in self.victims:
+            v.draw(surface, cam)
+
+        if self.active:
+            ratio = max(0.0, self.timer / self.TIMER)
+            col = GREEN if ratio > 0.5 else (GOLD if ratio > 0.25 else RED)
+            pygame.draw.rect(surface, (40, 20, 0), (sx - 40, sy - 118, 80, 8))
+            pygame.draw.rect(surface, col, (sx - 40, sy - 118, int(80 * ratio), 8))
+
+        super().draw(surface, cam)
+
+    def _draw_icon(self, surface, sx, sy):
+        # Slab pile with a scan line across it
+        pygame.draw.polygon(surface, LGRAY, [(sx - 9, sy + 5), (sx - 2, sy - 4), (sx + 4, sy + 5)])
+        pygame.draw.polygon(surface, GRAY, [(sx - 2, sy + 5), (sx + 6, sy - 2), (sx + 9, sy + 5)])
+        pygame.draw.line(surface, XRAY_C, (sx - 10, sy + 1), (sx + 10, sy + 1), 2)
+
+
+# ─── LEXCORP DECOY CRATES ─────────────────────────────────────────────────────
+
+class Crate:
+    """A LexCorp crate.
+
+    Deliberately quacks like an Enemy -- {x, y, take_damage, freeze} is the
+    entire interface main.py's all_enemies list and Superman's three power
+    methods touch -- so heat vision and Q-punch destroy it with no special
+    casing anywhere. HP is tuned so a punch (55) one-shots it while heat vision
+    (22 dps) needs ~2.3s of held aim, and the scorch that builds up in between
+    is the warning that you are about to commit.
+    """
+    SIZE = 56
+    HP   = 50
+    # Which crate to destroy is the whole decision here, so no ally may make it
+    minion_auto_attack = False
+
+    def __init__(self, x, y, content):
+        self.x, self.y = float(x), float(y)
+        self.content = content          # 'bomb' | 'decoy' | 'lead'
+        self.hp = self.HP
+        self.alive = True
+        self.scanned = False
+        self.char = 0.0
+        self._t = 0.0
+
+    def take_damage(self, amount):
+        self.hp -= amount
+        self.char = min(1.0, 1.0 - self.hp / self.HP)
+        if self.hp <= 0:
+            self.alive = False
+
+    def freeze(self, duration):
+        pass                            # crates don't care; try_freeze needs it
+
+
+class CrateEvent(BaseEvent):
+    INNER_RADIUS = 240
+    TIMER        = 75.0
+    SPACING      = 150     # must stay > try_punch's 90px splash, or one punch
+                           # takes out two crates and failure becomes accidental
+
+    def __init__(self, x, y):
+        super().__init__(x, y, EventType.FIGHT_LEX_CRATES)
+        self.timer = self.TIMER
+        contents = ['bomb', 'lead', 'decoy', 'decoy']
+        random.shuffle(contents)
+        h = self.SPACING // 2
+        spots = [(-h, -h), (h, -h), (-h, h), (h, h)]
+        self.crates = [Crate(x + ox, y + oy, c) for (ox, oy), c in zip(spots, contents)]
+        # Exposed under the name main.py:485 looks for, so the crates land in
+        # all_enemies and both destruction powers hit them for free. Never
+        # reassign self.crates with a filter -- self.enemies aliases it.
+        self.enemies = self.crates
+
+    def on_activate(self, superman):
+        pass
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if not self.active:
+            return
+        self.timer -= dt
+
+        for c in self.crates:
+            c._t += dt
+            if not c.scanned and superman.xray_reveals(c.x, c.y):
+                c.scanned = True
+            if c.char > 0 and c.alive and random.random() < 0.25 * c.char:
+                particles.burst(c.x, c.y, GRAY, count=2, speed=1.2, size=3, life=0.5)
+
+        # Resolve everything destroyed so far in one pass, because heat vision
+        # is a line and two crates can share a row -- judging them one at a
+        # time would set complete and failed in the same frame. If the bomb is
+        # among the wreckage the job got done, and a splintered decoy is just
+        # an empty box; only losing the bomb entirely is a failure.
+        downed = [c for c in self.crates if not c.alive and not getattr(c, '_resolved', False)]
+        for c in downed:
+            c._resolved = True
+            if c.content == 'bomb':
+                particles.shockwave(c.x, c.y)
+                particles.burst(c.x, c.y, FIRE_WARM, count=22, speed=4, size=6, life=0.6)
+                particles.burst(c.x, c.y, GRAY, count=18, speed=3, size=5, life=0.8, gravity=0.06)
+            else:
+                particles.burst(c.x, c.y, LGRAY, count=20, speed=3.5, size=5, life=0.7, gravity=0.05)
+        if downed and not self.complete and not self.failed:
+            # Failure wins over success. Heat vision is a 520px line that goes
+            # straight through a whole row, so without this precedence the
+            # winning strategy is to sweep the beam over all four crates and
+            # never scan anything -- which is the one thing this event is for.
+            if any(c.content != 'bomb' for c in downed):
+                self.failed = True
+            else:
+                self.complete = True
+
+        if not self.complete and not self.failed and self.timer <= 0:
+            particles.sonic_boom(self.x, self.y, FIRE_HOT)
+            self.failed = True
+
+    def get_ui_text(self):
+        scanned = sum(1 for c in self.crates if c.scanned)
+        n = len(self.crates)
+        if scanned < n:
+            return self.name, f"{scanned}/{n} crates scanned  -  X=X-Ray. Do NOT guess."
+        return self.name, "Bomb identified  -  Q=Punch that crate. Nothing else."
+
+    def draw(self, surface, cam):
+        if self.complete or self.failed:
+            return
+        for c in self.crates:
+            if c.alive:
+                self._draw_crate(surface, cam, c)
+        if self.active:
+            sx = int(self.x - cam.x)
+            sy = int(self.y - cam.y)
+            ratio = max(0.0, self.timer / self.TIMER)
+            col = GREEN if ratio > 0.5 else (GOLD if ratio > 0.25 else RED)
+            pygame.draw.rect(surface, (60, 0, 0), (sx - 40, sy - 130, 80, 8))
+            pygame.draw.rect(surface, col, (sx - 40, sy - 130, int(80 * ratio), 8))
+        super().draw(surface, cam)
+
+    def _draw_crate(self, surface, cam, c):
+        s = Crate.SIZE
+        sx = int(c.x - cam.x) - s // 2
+        sy = int(c.y - cam.y) - s // 2
+
+        if c.scanned:
+            self._draw_radiograph(surface, sx, sy, s, c)
+        else:
+            # Every unscanned crate must be pixel-identical -- no random() in
+            # this path, or the jitter itself becomes the tell.
+            pygame.draw.rect(surface, (124, 96, 62), (sx, sy, s, s))
+            for i in range(1, 4):
+                pygame.draw.line(surface, (98, 74, 46),
+                                 (sx, sy + i * s // 4), (sx + s, sy + i * s // 4), 2)
+            pygame.draw.line(surface, (98, 74, 46), (sx, sy), (sx + s, sy + s), 2)
+            pygame.draw.line(surface, (98, 74, 46), (sx + s, sy), (sx, sy + s), 2)
+            for bx, by in ((sx, sy), (sx + s - 10, sy),
+                           (sx, sy + s - 10), (sx + s - 10, sy + s - 10)):
+                pygame.draw.rect(surface, DARK_GRAY, (bx, by, 10, 10))
+            pygame.draw.polygon(surface, GOLD, [(sx + s // 2 - 7, sy + s // 2 + 6),
+                                                (sx + s // 2, sy + s // 2 - 7),
+                                                (sx + s // 2 + 7, sy + s // 2 + 6)], 2)
+        pygame.draw.rect(surface, (34, 30, 26), (sx, sy, s, s), 3)
+
+        if c.char > 0:
+            glow = pygame.Surface((s, s), pygame.SRCALPHA)
+            glow.fill((*FIRE_HOT, int(120 * c.char)))
+            surface.blit(glow, (sx, sy))
+
+        if c.scanned:
+            pygame.draw.line(surface, XRAY_C, (sx + 3, sy + 3), (sx + 13, sy + 3), 2)
+            pygame.draw.line(surface, XRAY_C, (sx + 3, sy + 3), (sx + 3, sy + 13), 2)
+
+    def _draw_radiograph(self, surface, sx, sy, s, c):
+        """Film-positive convention: dense material reads bright on a near-black
+        plate. 44x44 of usable interior after the frame, and events.py loads no
+        font, so every tell here has to be pictographic."""
+        pygame.draw.rect(surface, (16, 22, 28), (sx, sy, s, s))
+        ix, iy = sx + 6, sy + 6
+
+        if c.content == 'bomb':
+            bx = ix + 7
+            for i in range(3):
+                x0 = bx + i * 11
+                pygame.draw.rect(surface, (206, 236, 246), (x0, iy + 8, 8, 26))
+                pygame.draw.rect(surface, (128, 168, 184), (x0, iy + 8, 8, 26), 1)
+            pygame.draw.rect(surface, (238, 250, 255), (bx - 2, iy + 19, 34, 3))
+            pygame.draw.rect(surface, (232, 246, 252), (ix + 30, iy + 2, 11, 8))
+            pygame.draw.rect(surface, (110, 150, 168), (ix + 30, iy + 2, 11, 8), 1)
+            pygame.draw.lines(surface, (255, 255, 255), False,
+                              [(ix + 30, iy + 8), (ix + 24, iy + 12),
+                               (ix + 27, iy + 16), (ix + 18, iy + 14)], 2)
+        elif c.content == 'lead':
+            # The scan simply stops at the lining. The absence is the point.
+            pygame.draw.rect(surface, (6, 6, 9), (ix - 3, iy - 3, s - 6, s - 6))
+            for i in range(3):
+                gy = iy + 8 + i * 14 + int(2 * math.sin(c._t * 3 + i))
+                pygame.draw.line(surface, (0, 90, 100), (ix, gy), (ix + 44, gy), 1)
+        else:
+            for ox, oy, r in ((10, 12, 7), (26, 10, 6), (16, 30, 8), (32, 28, 5)):
+                pygame.draw.circle(surface, (74, 92, 102), (ix + ox, iy + oy), r)
+            pygame.draw.line(surface, (66, 84, 94), (ix + 2, iy + 22), (ix + 42, iy + 18), 2)
+
+    def _draw_icon(self, surface, sx, sy):
+        # Crate outline with a scan line
+        pygame.draw.rect(surface, (150, 118, 76), (sx - 8, sy - 7, 16, 14))
+        pygame.draw.rect(surface, DARK_GRAY, (sx - 8, sy - 7, 16, 14), 2)
+        pygame.draw.line(surface, XRAY_C, (sx - 10, sy), (sx + 10, sy), 2)
+
+
 # ─── FACTORY ──────────────────────────────────────────────────────────────────
 
 EVENT_FACTORIES = {
@@ -611,6 +917,8 @@ EVENT_FACTORIES = {
     EventType.RESCUE_HOSTAGE:  HostageEvent,
     EventType.ANIMAL_CAT:      CatEvent,
     EventType.ANIMAL_FLOOD:    FloodEvent,
+    EventType.RESCUE_RUBBLE:   RubbleEvent,
+    EventType.FIGHT_LEX_CRATES: CrateEvent,
 }
 
 

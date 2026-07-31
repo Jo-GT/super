@@ -59,5 +59,6 @@ Live at: https://jo-gt.github.io/super/
 | F / Right Click    | Freeze Breath (hold)              |
 | Q                  | Super Punch (dash to nearest enemy)|
 | Shift              | Super Speed                      |
+| X                  | X-Ray Vision (5s burst)          |
 | C                  | Call Krypto (temporary ally)     |
 | ESC                | Pause (Resume / Exit Game)       |

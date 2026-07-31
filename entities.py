@@ -125,9 +125,12 @@ class Superman:
     PUNCH_CD   = 1.8
     SPEED_CD   = 14.0
     SPEED_DUR  = 4.0
+    XRAY_CD    = 18.0
+    XRAY_DUR   = 5.0
     PUNCH_RANGE = 450
     HEAT_RANGE  = 520
     FREEZE_RANGE = 180
+    XRAY_RANGE  = 520
     PUNCH_DMG   = 55
     HEAT_DPS    = 22
 
@@ -149,6 +152,8 @@ class Superman:
         self.punch_cd = 0.0
         self.speed_cd = 0.0
         self.speed_remaining = 0.0
+        self.xray_cd = 0.0
+        self.xray_remaining = 0.0
         self._trail: list[tuple] = []
         self.score = 0
         self.reputation = 50
@@ -190,6 +195,7 @@ class Superman:
         self.freeze_cd   = max(0, self.freeze_cd - dt)
         self.punch_cd    = max(0, self.punch_cd  - dt)
         self.speed_cd    = max(0, self.speed_cd  - dt)
+        self.xray_cd     = max(0, self.xray_cd   - dt)
         self._hit_flash  = max(0, self._hit_flash - dt)
         self.krypto_debuff = max(0, self.krypto_debuff - dt)
 
@@ -198,6 +204,13 @@ class Superman:
             if self.speed_remaining <= 0:
                 self.speed_remaining = 0.0
                 self.speed_cd = self.SPEED_CD  # ran the full duration -> full cooldown
+
+        if self.xray_remaining > 0:
+            # No early cancel, so unlike speed this always charges the full cooldown
+            self.xray_remaining -= dt
+            if self.xray_remaining <= 0:
+                self.xray_remaining = 0.0
+                self.xray_cd = self.XRAY_CD
 
         if self._regen_pause > 0:
             self._regen_pause -= dt
@@ -304,6 +317,26 @@ class Superman:
         used = self.SPEED_DUR - self.speed_remaining
         self.speed_cd = self.SPEED_CD * (used / self.SPEED_DUR)
         self.speed_remaining = 0.0
+
+    def try_xray(self):
+        if self.xray_cd > 0 or self.xray_remaining > 0:
+            return False
+        self.xray_remaining = self.XRAY_DUR
+        return True
+
+    def xray_reveals(self, wx, wy):
+        """True while an X-ray burst is up and (wx, wy) is inside the scan sphere.
+
+        A radius, not a cone like freeze_covers: freeze breath is aimed and held,
+        so the player is already looking at whatever they're dousing. The X-ray
+        burst runs on a timer while the player keeps flying and keeps aiming the
+        mouse at other things, and a cone would blink buried objects in and out
+        as the mouse moved. Centred on the body, not head_pos -- it's a sphere
+        around him, not something emitted from his face.
+        """
+        if self.xray_remaining <= 0:
+            return False
+        return math.hypot(wx - self.x, wy - self.y) < self.XRAY_RANGE
 
     def _in_beam(self, px, py, tx, ty, threshold=28):
         ax, ay = self.head_pos
@@ -1082,6 +1115,59 @@ class Civilian:
             surface.blit(ws, (sx - wa, sy - wa + bob))
 
 
+class BuriedCivilian(Civilian):
+    """A Civilian trapped under rubble, invisible and un-rescuable until an
+    X-ray burst has found them.
+
+    A subclass rather than a flag on Civilian because three behaviours change:
+    the base draws a yellow distress ring that would broadcast the position for
+    free, it auto-rescues on proximity (which would let you clear the field
+    blind and skip the mechanic entirely), and a buried body wants an X-ray
+    silhouette rather than a bobbing pedestrian.
+    """
+    RESCUE_R = 34   # a shade wider than Civilian's 30 -- they're under a slab
+
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.revealed = False
+        self._dug = False   # one-shot latch for the extraction dust burst
+
+    def update(self, dt, superman):
+        self._t += dt
+        if self.revealed and not self.saved:
+            if math.hypot(superman.x - self.x, superman.y - self.y) < self.RESCUE_R:
+                self.saved = True
+
+    def draw(self, surface, cam):
+        if self.saved or not self.revealed:
+            return
+        sx = int(self.x - cam.x)
+        sy = int(self.y - cam.y)
+        pulse = 0.5 + 0.5 * math.sin(self._t * 4.5)
+
+        # Locator ring. Replaces the base distress wave -- this one is earned,
+        # so it is allowed to shout.
+        r = 26
+        ring = pygame.Surface((r * 2 + 4, r * 2 + 4), pygame.SRCALPHA)
+        pygame.draw.circle(ring, (*XRAY_C, int(90 + 90 * pulse)), (r + 2, r + 2), r, 2)
+        surface.blit(ring, (sx - r - 2, sy - r - 2))
+
+        # X-ray silhouette: dense material bright, same convention as the crates
+        body = (215, 240, 250)
+        pygame.draw.ellipse(surface, body, (sx - 9, sy - 5, 18, 12))
+        pygame.draw.circle(surface, body, (sx - 12, sy - 8), 5)
+        for i in range(3):
+            pygame.draw.line(surface, (150, 190, 205),
+                             (sx - 6, sy - 2 + i * 4), (sx + 6, sy - 2 + i * 4), 1)
+        pygame.draw.line(surface, body, (sx + 4, sy + 2), (sx + 14, sy + 8), 3)
+        pygame.draw.line(surface, body, (sx + 2, sy + 5), (sx + 10, sy + 12), 3)
+
+        # Bobbing chevron so they stay findable across a 300px field
+        my = sy - 40 + int(3 * math.sin(self._t * 4.5))
+        pygame.draw.polygon(surface, XRAY_C,
+                            [(sx - 7, my), (sx + 7, my), (sx, my + 9)])
+
+
 class Animal:
     TYPES = ['cat', 'dog', 'bird']
 
@@ -1140,6 +1226,13 @@ class Krypto:
 
     States: idle -> calling (whistle playing) -> incoming (flying to Superman)
     -> active (fighting/orbiting) -> back to idle with the cooldown running.
+
+    Objects in the enemies list may set `minion_auto_attack = False` to opt out
+    of being targeted (see the target loop in update). Not everything an event
+    exposes as an "enemy" is meant to be cleared by force -- some events use
+    that list for things the player has to pick between deliberately, where an
+    ally choosing on its own would resolve or fail the event on their behalf.
+    Any future minion should honour the same flag.
     """
 
     CALL_CD       = 35.0
@@ -1263,7 +1356,11 @@ class Krypto:
 
         nearest, best_d = None, self.LEASH_RANGE
         for e in enemies:
-            if not e.alive:
+            # An event's enemies list is also how it exposes objects to the
+            # player's own powers, so it can hold things that are a decision
+            # rather than a fight. Those opt out here, otherwise a minion picks
+            # for the player and the event resolves without them.
+            if not e.alive or not getattr(e, 'minion_auto_attack', True):
                 continue
             d = math.hypot(e.x - superman.x, e.y - superman.y)
             if d < best_d:

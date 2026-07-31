@@ -8,6 +8,7 @@ Controls:
   F / RMB            - Freeze Breath
   Q                  - Super Punch (dash to nearest enemy)
   Shift              - Super Speed
+  X                  - X-Ray Vision (burst)
   C                  - Call Krypto (temporary ally)
 """
 
@@ -62,6 +63,7 @@ snd_sprint    = _load_sound("beginsprint.ogg")
 snd_heat      = _load_sound("heatvision.ogg")
 snd_freeze    = _load_sound("freeze breath.ogg")
 snd_punch     = _load_sound("punch.ogg")
+snd_xray      = _load_sound("xrayvision.ogg")
 snd_gameover  = _load_sound("GameOver.ogg")
 
 _MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.ogg")
@@ -143,7 +145,7 @@ def draw_bar(surf, x, y, w, h, ratio, full_col, empty_col=(60, 0, 0), label=None
         draw_text(surf, label, font_tiny, WHITE, x + w + 4, y, shadow=False)
 
 
-def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label):
+def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label, cd_secs=None):
     bg = pygame.Surface((size, size), pygame.SRCALPHA)
     bg.fill((0, 0, 0, 140))
     surf.blit(bg, (x, y))
@@ -153,8 +155,14 @@ def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label):
         overlay = pygame.Surface((size, size), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, int(180 * cd_ratio)))
         surf.blit(overlay, (x, y))
-        draw_text(surf, f"{cd_ratio:.1f}s" if cd_ratio > 0.5 else "", font_tiny, WHITE,
-                  x + size // 2, y + size // 2 + 6, center=True, shadow=False)
+        # Real seconds left, not the 0..1 ratio this used to print with an "s"
+        # stuck on the end -- that read "0.5s" with nine seconds still to go.
+        # Sub-second cooldowns (heat 0.08s, freeze 0.12s) are skipped; a number
+        # that small only flickers.
+        if cd_secs is not None and cd_secs >= 0.5:
+            secs = f"{cd_secs:.0f}s" if cd_secs >= 10 else f"{cd_secs:.1f}s"
+            draw_text(surf, secs, font_tiny, WHITE,
+                      x + size // 2, y + size // 2 + 6, center=True, shadow=False)
     draw_text(surf, key_label, font_tiny, LGRAY, x + 2, y + size - 14, shadow=False)
 
 
@@ -221,32 +229,38 @@ class HUD:
         # ── Power icons ───────────────────────────────────────────────────────
         icon_y = SCREEN_H - 72
         icon_sz = 56
+        # One row per power: (label, colour, cooldown 0..1, seconds remaining,
+        # key, duration 0..1 or None). Everything a power needs lives on its own
+        # line, so adding one is a single entry and an icon can't drift out of
+        # step with its own bar -- they used to be separate calls that repeated
+        # the label and colour, and a hardcoded bar index went stale the moment
+        # a power was inserted ahead of it. Cooldown ratio and seconds are both
+        # carried because they genuinely differ: Krypto reads fully dimmed while
+        # he's deployed, yet has no cooldown pending.
         powers = [
-            ("HEAT\nVISN", FIRE_HOT,   superman.heat_cd,  superman.HEAT_CD,  "SPACE"),
-            ("FRZE\nBRTH", ICE,         superman.freeze_cd, superman.FREEZE_CD, "F"),
-            ("SPNCH",       YELLOW_S,   superman.punch_cd, superman.PUNCH_CD, "Q"),
-            ("SPDS",        CYAN,        superman.speed_cd, superman.SPEED_CD, "SHIFT"),
+            ("HEAT\nVISN", FIRE_HOT, superman.heat_cd / superman.HEAT_CD,     superman.heat_cd,   "SPACE", None),
+            ("FRZE\nBRTH", ICE,      superman.freeze_cd / superman.FREEZE_CD, superman.freeze_cd, "F",     None),
+            ("SPNCH",      YELLOW_S, superman.punch_cd / superman.PUNCH_CD,   superman.punch_cd,  "Q",     None),
+            ("SPDS",       CYAN,     superman.speed_cd / superman.SPEED_CD,   superman.speed_cd,  "SHIFT",
+             superman.speed_remaining / superman.SPEED_DUR if superman.speed_remaining > 0 else None),
+            ("XRAY",       XRAY_C,   superman.xray_cd / superman.XRAY_CD,     superman.xray_cd,   "X",
+             superman.xray_remaining / superman.XRAY_DUR if superman.xray_remaining > 0 else None),
         ]
+        # Defensive: the game always builds a Krypto, but the HUD should degrade
+        # to a missing icon rather than crash if that ever stops being true.
         if krypto is not None:
-            powers.append(("KRYPTO", SILVER, krypto.cd_ratio * krypto.CALL_CD, krypto.CALL_CD, "C"))
+            powers.append(("KRYPTO", SILVER, krypto.cd_ratio, krypto.call_cd, "C",
+                           krypto.timer / krypto.ACTIVE_DUR if krypto.state == 'active' else None))
+
         total_w = len(powers) * (icon_sz + 8) - 8
         start_x = SCREEN_W // 2 - total_w // 2
-        for i, (label, col, cd, max_cd, key) in enumerate(powers):
+        for i, (label, col, cd_ratio, cd_secs, key, dur) in enumerate(powers):
             ix = start_x + i * (icon_sz + 8)
-            ratio = cd / max_cd if max_cd > 0 else 0
-            cooldown_icon(surface, ix, icon_y, icon_sz, col, label, ratio, key)
-
-        # Speed remaining
-        if superman.speed_remaining > 0:
-            pct = superman.speed_remaining / superman.SPEED_DUR
-            ix = start_x + 3 * (icon_sz + 8)
-            pygame.draw.rect(surface, CYAN, (ix, icon_y + icon_sz - 6, int(icon_sz * pct), 4))
-
-        # Krypto active-duration remaining
-        if krypto is not None and krypto.state == 'active':
-            pct = krypto.timer / krypto.ACTIVE_DUR
-            ix = start_x + 4 * (icon_sz + 8)
-            pygame.draw.rect(surface, SILVER, (ix, icon_y + icon_sz - 6, int(icon_sz * pct), 4))
+            cooldown_icon(surface, ix, icon_y, icon_sz, col, label, cd_ratio, key, cd_secs)
+            if dur is not None:
+                # After its own icon, so the bar lies over the dim overlay --
+                # the same order the separate bar pass produced.
+                pygame.draw.rect(surface, col, (ix, icon_y + icon_sz - 6, int(icon_sz * dur), 4))
 
         # ── Active event banner ───────────────────────────────────────────────
         if active_event:
@@ -423,6 +437,30 @@ def _effect_blit(layer, region):
     screen.blit(layer, region.topleft, region)
 
 
+# ─── X-RAY WASH ───────────────────────────────────────────────────────────────
+# Baked once and held for the whole run, same reasoning as ScreenFlash and
+# _pause_dim: the tint and its scanlines never change, so there is nothing to
+# redraw per frame and no full-screen SRCALPHA allocation to pay for. The
+# surface is one line-gap taller than the screen so the scanlines can scroll by
+# moving the blit's source rect rather than being redrawn.
+#
+# Both colours below are final pixel values, not increments: pygame's draw
+# functions replace the pixel on an SRCALPHA surface instead of blending into
+# it, so the scanline rows already carry the alpha they end up with.
+
+_XRAY_LINE_GAP = 4
+_xray_wash = pygame.Surface((SCREEN_W, SCREEN_H + _XRAY_LINE_GAP), pygame.SRCALPHA)
+_xray_wash.fill((34, 6, 62, 118))
+for _wy in range(0, SCREEN_H + _XRAY_LINE_GAP, _XRAY_LINE_GAP):
+    pygame.draw.line(_xray_wash, (128, 62, 205, 165), (0, _wy), (SCREEN_W, _wy))
+
+
+def draw_xray_wash(surface, phase):
+    """One blit. `phase` scrolls the scanlines; nothing is re-rendered."""
+    off = int(phase) % _XRAY_LINE_GAP
+    surface.blit(_xray_wash, (0, 0), (0, off, SCREEN_W, SCREEN_H))
+
+
 # ─── GAME ─────────────────────────────────────────────────────────────────────
 
 class Game:
@@ -451,6 +489,7 @@ class Game:
         self._heat_playing = False
         self._freeze_playing = False
         self._shift_prev = False
+        self._xray_prev = False
         self._c_prev = False
 
         # Mouse buttons are read as a level, not an edge, so the click that
@@ -539,6 +578,17 @@ class Game:
                     snd_sprint.play()
         self._shift_prev = shift_down
 
+        # X-Ray Vision: X (one-shot burst, expires on its own)
+        # Edge-detected like the shift toggle: keys is a level read, so without
+        # this the sound would retrigger every frame X is held on cooldown.
+        x_down = bool(keys[pygame.K_x])
+        if x_down and not self._xray_prev:
+            if s.try_xray():
+                self.flash.trigger(XRAY_C, 50)
+                if snd_xray:
+                    snd_xray.play()
+        self._xray_prev = x_down
+
         # Call Krypto: C (edge-triggered so a held key doesn't spam the notice)
         c_down = bool(keys[pygame.K_c])
         if c_down and not self._c_prev:
@@ -557,6 +607,8 @@ class Game:
             snd_heat.stop()
         if snd_freeze:
             snd_freeze.stop()
+        if snd_xray:
+            snd_xray.stop()
         self._wind_playing = False
         self._heat_playing = False
         self._freeze_playing = False
@@ -610,6 +662,9 @@ class Game:
                 s.reputation = max(0, s.reputation - 12)
                 self.notify(f"FAILED: {ev.name}", RED)
                 self.flash.trigger(RED, 100)
+                if ev.event_type in LEX_FAIL_LINES:
+                    self.dialogue.trigger('lex', LEX_FAIL_LINES[ev.event_type],
+                                          SUPERMAN_FAIL_LINES[ev.event_type])
 
         # Remove finished events
         self.events = [e for e in self.events if not (e.complete or e.failed)]
@@ -644,6 +699,15 @@ class Game:
     def draw(self):
         # World
         self.city.draw(screen, self.camera)
+
+        # X-ray wash: over the city, under everything else. Anything an event
+        # only draws while revealed goes out in its normal draw() below and so
+        # lands on top of the tint with no special-casing anywhere.
+        if self.superman.xray_remaining > 0:
+            draw_xray_wash(screen, self.superman.xray_remaining * 24.0)
+            xsx = int(self.superman.x - self.camera.x)
+            xsy = int(self.superman.y - self.camera.y)
+            pygame.draw.circle(screen, XRAY_C, (xsx, xsy), Superman.XRAY_RANGE, 2)
 
         # Events world elements
         for ev in self.events:
@@ -775,7 +839,7 @@ def draw_menu():
 
         # Controls box
         bx2, by2 = SCREEN_W // 2 - 300, 250
-        box_h = 280
+        box_h = 300          # 8 rows at 36px from by2+16 end at ~by2+285
         bg = pygame.Surface((600, box_h), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 160))
         screen.blit(bg, (bx2, by2))
@@ -786,6 +850,7 @@ def draw_menu():
             ("F / Right Click", "Freeze Breath"),
             ("Q", "Super Punch (dash to enemy)"),
             ("Shift", "Super Speed"),
+            ("X", "X-Ray Vision (burst)"),
             ("C", "Call Krypto (temporary ally)"),
             ("Mouse", "Aim direction"),
         ]
@@ -795,8 +860,8 @@ def draw_menu():
             draw_text(screen, desc, font_small, WHITE, bx2 + 220, y)
 
         # Start prompt
-        draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 555, center=True)
-        draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 605, center=True)
+        draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 585, center=True)
+        draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 630, center=True)
 
     pygame.display.flip()
 
