@@ -53,17 +53,56 @@ _KRYPTO_SCALE = 0.34  # single physical scale applied to both sheets so the bite
                       # pose's taller lunge reads as the same dog, just airborne
 
 
+def _krypto_pose_spans(sheet, frame_count, min_gap=8):
+    """Column ranges of each pose, or None if the sheet doesn't look as expected.
+
+    The Krypto sheets aren't an even grid - the poses sit at irregular intervals
+    and the widths don't divide by the frame count - so slicing at fixed offsets
+    clips each dog and drags the previous pose's tail into the next cell. Find
+    the poses by their transparent gutters instead. Gaps under min_gap are holes
+    inside a pose (the art has a few 1px ones), not gutters between poses.
+    """
+    sw, sh = sheet.get_size()
+    filled = [sheet.subsurface((x, 0, 1, sh)).get_bounding_rect(min_alpha=1).height > 0
+              for x in range(sw)]
+    runs, start = [], None
+    for x in range(sw):
+        if filled[x] and start is None:
+            start = x
+        elif not filled[x] and start is not None:
+            runs.append((start, x - 1))
+            start = None
+    if start is not None:
+        runs.append((start, sw - 1))
+
+    spans = []
+    for x0, x1 in runs:
+        if spans and x0 - spans[-1][1] - 1 < min_gap:
+            spans[-1] = (spans[-1][0], x1)
+        else:
+            spans.append((x0, x1))
+    return spans if len(spans) == frame_count else None
+
+
 def _load_krypto_frames(filename, frame_count):
     try:
         path = os.path.join(_KRYPTO_SPRITES_DIR, filename)
         sheet = pygame.image.load(path).convert_alpha()
         sw, sh = sheet.get_size()
-        fw = sw // frame_count
-        tw, th = max(1, round(fw * _KRYPTO_SCALE)), max(1, round(sh * _KRYPTO_SCALE))
+        spans = _krypto_pose_spans(sheet, frame_count)
+        if spans is None:  # unexpected art: fall back to an even grid
+            fw = sw // frame_count
+            spans = [(i * fw, i * fw + fw - 1) for i in range(frame_count)]
+        # One cell size for every pose, so the dog keeps a single scale and
+        # doesn't pop between frames. Full sheet height keeps the artist's
+        # vertical bob and the bite pose's lunge.
+        cell_w = max(x1 - x0 + 1 for x0, x1 in spans)
+        tw, th = max(1, round(cell_w * _KRYPTO_SCALE)), max(1, round(sh * _KRYPTO_SCALE))
         frames = []
-        for i in range(frame_count):
-            frame = sheet.subsurface((i * fw, 0, fw, sh))
-            frames.append(pygame.transform.smoothscale(frame, (tw, th)))
+        for x0, x1 in spans:
+            cell = pygame.Surface((cell_w, sh), pygame.SRCALPHA)
+            cell.blit(sheet, ((cell_w - (x1 - x0 + 1)) // 2, 0), (x0, 0, x1 - x0 + 1, sh))
+            frames.append(pygame.transform.smoothscale(cell, (tw, th)))
         return frames
     except Exception:
         return []
@@ -125,7 +164,7 @@ class Superman:
     PUNCH_CD   = 1.8
     SPEED_CD   = 14.0
     SPEED_DUR  = 4.0
-    XRAY_CD    = 18.0
+    XRAY_CD    = 9.0
     XRAY_DUR   = 5.0
     PUNCH_RANGE = 450
     HEAT_RANGE  = 520
@@ -643,8 +682,8 @@ class Thug(Enemy):
                 img = sprite.copy(); img.fill((180, 180, 180, 0), special_flags=pygame.BLEND_RGB_ADD)
             elif self.frozen > 0:
                 img = sprite.copy(); img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
-            # Sheet's native pose faces left; flip when facing right.
-            draw_img = pygame.transform.flip(img, True, False) if self.face_right else img
+            # Sheet's native pose faces right; flip when facing left.
+            draw_img = img if self.face_right else pygame.transform.flip(img, True, False)
             rect = draw_img.get_rect(midbottom=(sx, sy + self.RADIUS))
             surface.blit(draw_img, rect)
             draw_health_bar(surface, sx, rect.top - 8, self.hp, self.max_hp, self.RADIUS * 2)
@@ -685,6 +724,10 @@ class LexGoon(Thug):
         elif self.frozen > 0:
             img = sprite.copy()
             img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
+        # This sprite's head is turned to its left, so flip when facing right
+        # (the opposite of the Thug sheets, which are drawn facing right).
+        if self.face_right:
+            img = pygame.transform.flip(img, True, False)
         rect = img.get_rect(center=(sx, sy))
         surface.blit(img, rect)
         draw_health_bar(surface, sx, rect.top - 8, self.hp, self.max_hp, self.RADIUS * 2)
