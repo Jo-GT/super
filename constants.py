@@ -29,6 +29,8 @@ FIRE_WARM = (255, 198, 0)
 ICE       = (173, 228, 255)
 KRYPTO    = (0,   218, 78)
 PURPLE    = (128, 0,   208)
+XRAY_C    = (176, 96,  246)   # brighter than PURPLE so the HUD icon reads as clearly
+                              # as the other four power colours against the dark box
 SILVER    = (178, 183, 190)
 DARK_GRAY = (48,  50,  56)
 HUD_BG    = (8,   8,   18)
@@ -59,6 +61,8 @@ class EventType(Enum):
     ANIMAL_FLOOD    = auto()
     FIGHT_LEX_GOONS    = auto()
     FIGHT_LEX_MECHSUIT = auto()
+    RESCUE_RUBBLE      = auto()
+    FIGHT_LEX_CRATES   = auto()
 
 EVENT_CAT = {
     EventType.FIGHT_CRIMINALS: 'fight',
@@ -73,6 +77,8 @@ EVENT_CAT = {
     EventType.ANIMAL_FLOOD:    'animal',
     EventType.FIGHT_LEX_GOONS:    'fight',
     EventType.FIGHT_LEX_MECHSUIT: 'fight',
+    EventType.RESCUE_RUBBLE:      'rescue',
+    EventType.FIGHT_LEX_CRATES:   'fight',
 }
 
 EVENT_NAMES = {
@@ -88,6 +94,8 @@ EVENT_NAMES = {
     EventType.ANIMAL_FLOOD:    "Flooded Animal Shelter",
     EventType.FIGHT_LEX_GOONS:    "Lex Goons Incoming!",
     EventType.FIGHT_LEX_MECHSUIT: "!! LEX MECH SUIT ONLINE !!",
+    EventType.RESCUE_RUBBLE:      "Collapsed Building!",
+    EventType.FIGHT_LEX_CRATES:   "LexCorp Decoy Crates",
 }
 
 EVENT_HINTS = {
@@ -103,6 +111,8 @@ EVENT_HINTS = {
     EventType.ANIMAL_FLOOD:    "F=Freeze the water and rescue all animals!",
     EventType.FIGHT_LEX_GOONS:    "SPACE=Heat Vision  F=Freeze  Q=Punch",
     EventType.FIGHT_LEX_MECHSUIT: "Dodge the missile barrage! Use Q=Punch!",
+    EventType.RESCUE_RUBBLE:      "X=X-Ray Vision to find the buried, then fly to each survivor!",
+    EventType.FIGHT_LEX_CRATES:   "X=X-Ray to scan, then Q=Punch the bomb. Heat vision cuts straight through!",
 }
 
 CAT_COLORS = {
@@ -124,33 +134,50 @@ SCORE_TABLE = {
     EventType.ANIMAL_FLOOD:    700,
     EventType.FIGHT_LEX_GOONS:    650,
     EventType.FIGHT_LEX_MECHSUIT: 3200,
+    EventType.RESCUE_RUBBLE:      1100,
+    EventType.FIGHT_LEX_CRATES:   1400,
 }
 
 LEX_EVENT_TYPES = {
     EventType.FIGHT_ROBOTS,
     EventType.FIGHT_LEX_GOONS,
     EventType.FIGHT_LEX_MECHSUIT,
+    EventType.FIGHT_LEX_CRATES,
 }
 
 LEX_INTRO_LINES = {
     EventType.FIGHT_ROBOTS:       "Rise, my LexCorp sentries. Bring me a souvenir from that alien's cape.",
     EventType.FIGHT_LEX_GOONS:    "Boys, our resident alien nuisance is nearby. Remind him whose city this is.",
     EventType.FIGHT_LEX_MECHSUIT: "Enough delegating. Time I settled this myself... suit up!",
+    EventType.FIGHT_LEX_CRATES:   "Four crates, one bomb. Do try to read them properly -- the whole block is watching.",
 }
 LEX_DEFEAT_LINES = {
     EventType.FIGHT_ROBOTS:       "Scrap metal. I'll bill R&D for sturdier sentries.",
     EventType.FIGHT_LEX_GOONS:    "Overtime pay revoked for the lot of you. Useless.",
     EventType.FIGHT_LEX_MECHSUIT: "This isn't over, Su... I mean -- Superman. Enjoy this small victory.",
+    EventType.FIGHT_LEX_CRATES:   "Lucky guess. I'll line the next one in something you can't see through either.",
 }
 SUPERMAN_INTRO_LINES = {
     EventType.FIGHT_ROBOTS:       "Another one of your toys, Luthor? Metropolis isn't your test lab.",
     EventType.FIGHT_LEX_GOONS:    "Paying goons again, Lex? At least give them dental.",
     EventType.FIGHT_LEX_MECHSUIT: "A mech suit? Bold move for a man allergic to a fair fight.",
+    EventType.FIGHT_LEX_CRATES:   "You put a bomb in a puzzle box, Lex. That's a new low, even for you.",
 }
 SUPERMAN_DEFEAT_LINES = {
     EventType.FIGHT_ROBOTS:       "Back to the scrapyard, where LexCorp's ideas belong.",
     EventType.FIGHT_LEX_GOONS:    "Tell your boss Metropolis says hello.",
     EventType.FIGHT_LEX_MECHSUIT: "Suit's down, Lex. Try origami next time -- less collateral damage.",
+    EventType.FIGHT_LEX_CRATES:   "No guessing involved. I just looked.",
+}
+
+# Gloat lines for events that can be failed outright. Consumed via a membership
+# test in main.py, so an event only needs entries here if it has a fail state
+# worth commenting on.
+LEX_FAIL_LINES = {
+    EventType.FIGHT_LEX_CRATES: "The lead-lined one. You always did punch first. Do enjoy the fireworks.",
+}
+SUPERMAN_FAIL_LINES = {
+    EventType.FIGHT_LEX_CRATES: "That was the wrong box. Nobody else pays for that, Luthor.",
 }
 
 METALLO_EVENT_TYPES = {
