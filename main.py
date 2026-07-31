@@ -836,8 +836,9 @@ class Game:
         if self.superman.heat_firing:
             sx = int(self.superman.head_pos[0] - self.camera.x)
             sy = int(self.superman.head_pos[1] - self.camera.y)
-            ex = int(sx + math.cos(self.superman.facing) * Superman.HEAT_RANGE)
-            ey = int(sy + math.sin(self.superman.facing) * Superman.HEAT_RANGE)
+            tx, ty = self.superman.heat_beam_target()   # same endpoint the hit test uses
+            ex = int(tx - self.camera.x)
+            ey = int(ty - self.camera.y)
             # Beam (layered glow, drawn every frame the trigger is held for a solid long beam)
             region = _effect_region([(sx, sy), (ex, ey)], 10)   # 10 clears the 16px line
             beam_surf = _effect_begin(region)

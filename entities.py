@@ -200,6 +200,7 @@ class Superman:
         self.heat_firing = False
         self.freeze_active = False
         self.head_pos = (self.x, self.y)
+        self.aim_world = None    # last cursor position, for aiming the beam
 
         # Sprites: flying (moving), hover (idle), death
         self._sprite_fly   = Superman._load_sprite("superman flying.png",          (96, 44))
@@ -262,6 +263,7 @@ class Superman:
         dy = mouse_world[1] - self.y
         if dx * dx + dy * dy > 4:
             self.facing = math.atan2(dy, dx)
+        self.aim_world = mouse_world
 
         # Movement
         spd = self.SPEED * (3.0 if self.speed_remaining > 0 else 1.0)
@@ -295,11 +297,28 @@ class Superman:
     def can_use_heat_vision(self):
         return self.heat_cd <= 0
 
+    def heat_beam_angle(self):
+        """Direction from the head to the cursor.
+
+        Deliberately not self.facing: that is measured from the body centre and
+        drives the sprite. The beam leaves the head, so aiming it along facing
+        sent it parallel to the body-to-cursor line but offset from it by the
+        head offset, and it visibly missed what you were pointing at.
+        """
+        if self.aim_world is None:
+            return self.facing
+        dx = self.aim_world[0] - self.head_pos[0]
+        dy = self.aim_world[1] - self.head_pos[1]
+        if dx * dx + dy * dy < 4:      # cursor on the head; no meaningful angle
+            return self.facing
+        return math.atan2(dy, dx)
+
     def heat_beam_target(self):
-        """Far end of the beam, from the head along the current facing."""
+        """Far end of the beam: out from the head, through the cursor, to range."""
+        a = self.heat_beam_angle()
         hx, hy = self.head_pos
-        return (hx + math.cos(self.facing) * self.HEAT_RANGE,
-                hy + math.sin(self.facing) * self.HEAT_RANGE)
+        return (hx + math.cos(a) * self.HEAT_RANGE,
+                hy + math.sin(a) * self.HEAT_RANGE)
 
     def heat_beam_hits(self, enemies):
         """Whether the beam is touching anything right now.
