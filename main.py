@@ -16,154 +16,23 @@ import pygame
 import math
 import random
 import asyncio
-import os
 
+import audio
+from audio import (BeamAudio, LoopingSound, duck_music, play_bgm_music,
+                   play_menu_music, stop_music, unduck_music)
 from constants import *
+from hud import HUD, draw_text, font_large
 from city import City
 from particles import ParticleSystem
 from entities import Superman, Krypto
 from events import BaseEvent, spawn_random_event
 from dialogue import DialogueManager
-
-_TITLE_FRAMES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Title Page", "frames")
-_TITLE_FRAME_FPS = 15.0
+from screens import draw_game_over, draw_menu, draw_pause, menu_video, PAUSE_ITEMS
 
 pygame.init()
 screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
 pygame.display.set_caption(TITLE)
 clock = pygame.time.Clock()
-
-try:
-    font_xl    = pygame.font.SysFont("Arial", 56, bold=True)
-    font_large = pygame.font.SysFont("Arial", 34, bold=True)
-    font_med   = pygame.font.SysFont("Arial", 22, bold=True)
-    font_small = pygame.font.SysFont("Arial", 17)
-    font_tiny  = pygame.font.SysFont("Arial", 14)
-except Exception:
-    font_xl    = pygame.font.Font(None, 56)
-    font_large = pygame.font.Font(None, 34)
-    font_med   = pygame.font.Font(None, 22)
-    font_small = pygame.font.Font(None, 17)
-    font_tiny  = pygame.font.Font(None, 14)
-
-# ─── SOUND ────────────────────────────────────────────────────────────────────
-
-_SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Sounds")
-
-
-def _load_sound(filename):
-    try:
-        return pygame.mixer.Sound(os.path.join(_SOUNDS_DIR, filename))
-    except Exception:
-        return None
-
-
-snd_wind      = _load_sound("flying wind noise.ogg")
-snd_sprint    = _load_sound("beginsprint.ogg")
-snd_heat      = _load_sound("heatvision.ogg")
-snd_freeze    = _load_sound("freeze breath.ogg")
-snd_punch     = _load_sound("punch.ogg")
-snd_xray      = _load_sound("xrayvision.ogg")
-snd_gameover  = _load_sound("GameOver.ogg")
-
-_MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.ogg")
-_BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.ogg")
-_BGM_VOLUME      = 0.55
-_PAUSE_DUCK      = 0.2   # fraction of normal volume while the pause menu is up
-_current_music = None  # 'menu' | 'bgm' | None
-
-
-def _play_music(path, volume, tag):
-    global _current_music
-    if _current_music == tag:
-        return
-    try:
-        pygame.mixer.music.load(path)
-        pygame.mixer.music.set_volume(volume)
-        pygame.mixer.music.play(loops=-1)
-        _current_music = tag
-    except Exception:
-        pass
-
-
-def play_menu_music():
-    _play_music(_MENU_MUSIC_PATH, 1.0, 'menu')
-
-
-def play_bgm_music():
-    _play_music(_BGM_MUSIC_PATH, _BGM_VOLUME, 'bgm')
-
-
-def duck_music():
-    """Drop the music under the pause menu. _play_music won't reset the volume
-    on the way back out (same tag = no-op), so resuming must unduck explicitly."""
-    try:
-        pygame.mixer.music.set_volume(_BGM_VOLUME * _PAUSE_DUCK)
-    except Exception:
-        pass
-
-
-def unduck_music():
-    try:
-        pygame.mixer.music.set_volume(_BGM_VOLUME)
-    except Exception:
-        pass
-
-
-def stop_music():
-    global _current_music
-    pygame.mixer.music.stop()
-    _current_music = None
-
-
-# ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-def draw_text(surf, text, font, color, x, y, center=False, shadow=True):
-    if shadow:
-        s = font.render(text, True, BLACK)
-        r = s.get_rect()
-        if center:
-            r.center = (x + 1, y + 1)
-        else:
-            r.topleft = (x + 1, y + 1)
-        surf.blit(s, r)
-    img = font.render(text, True, color)
-    r = img.get_rect()
-    if center:
-        r.center = (x, y)
-    else:
-        r.topleft = (x, y)
-    surf.blit(img, r)
-    return r
-
-
-def draw_bar(surf, x, y, w, h, ratio, full_col, empty_col=(60, 0, 0), label=None):
-    pygame.draw.rect(surf, empty_col, (x, y, w, h))
-    pygame.draw.rect(surf, full_col, (x, y, int(w * max(0, min(1, ratio))), h))
-    pygame.draw.rect(surf, WHITE, (x, y, w, h), 1)
-    if label:
-        draw_text(surf, label, font_tiny, WHITE, x + w + 4, y, shadow=False)
-
-
-def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label, cd_secs=None):
-    bg = pygame.Surface((size, size), pygame.SRCALPHA)
-    bg.fill((0, 0, 0, 140))
-    surf.blit(bg, (x, y))
-    pygame.draw.rect(surf, color, (x, y, size, size), 2)
-    draw_text(surf, label, font_tiny, color, x + size // 2, y + size // 2, center=True, shadow=True)
-    if cd_ratio > 0:
-        overlay = pygame.Surface((size, size), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, int(180 * cd_ratio)))
-        surf.blit(overlay, (x, y))
-        # Real seconds left, not the 0..1 ratio this used to print with an "s"
-        # stuck on the end -- that read "0.5s" with nine seconds still to go.
-        # Sub-second cooldowns (heat 0.08s, freeze 0.12s) are skipped; a number
-        # that small only flickers.
-        if cd_secs is not None and cd_secs >= 0.5:
-            secs = f"{cd_secs:.0f}s" if cd_secs >= 10 else f"{cd_secs:.1f}s"
-            draw_text(surf, secs, font_tiny, WHITE,
-                      x + size // 2, y + size // 2 + 6, center=True, shadow=False)
-    draw_text(surf, key_label, font_tiny, LGRAY, x + 2, y + size - 14, shadow=False)
 
 
 # ─── CAMERA ───────────────────────────────────────────────────────────────────
@@ -181,145 +50,6 @@ class Camera:
         self.y += (target_y - self.y) * speed
         self.x = max(0, min(WORLD_W - SCREEN_W, self.x))
         self.y = max(0, min(WORLD_H - SCREEN_H, self.y))
-
-
-# ─── HUD ──────────────────────────────────────────────────────────────────────
-
-class HUD:
-    MINIMAP_W = 200
-    MINIMAP_H = 160
-    MINIMAP_X = SCREEN_W - 210
-    MINIMAP_Y = SCREEN_H - 170
-
-    def __init__(self):
-        self._score_anim = 0
-        self._last_score = 0
-
-    def draw(self, surface, superman, events, camera, active_event=None, krypto=None):
-        # ── Health bar ───────────────────────────────────────────────────────
-        hp_ratio = superman.hp / superman.MAX_HP
-        hp_col = GREEN if hp_ratio > 0.5 else (GOLD if hp_ratio > 0.25 else RED)
-        bg = pygame.Surface((224, 26), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 150))
-        surface.blit(bg, (8, 8))
-        draw_text(surface, "HP", font_tiny, LGRAY, 12, 12)
-        draw_bar(surface, 34, 12, 180, 14, hp_ratio, hp_col)
-        draw_text(surface, f"{int(superman.hp)}/{superman.MAX_HP}", font_tiny, WHITE, 220, 12)
-
-        # ── Krypto warning ───────────────────────────────────────────────────
-        if superman.krypto_debuff > 0:
-            a = int(180 + 75 * abs(math.sin(pygame.time.get_ticks() * 0.005)))
-            draw_text(surface, "KRYPTONITE!", font_med, (*KRYPTO, a), SCREEN_W // 2, 8, center=True)
-
-        # ── Score ─────────────────────────────────────────────────────────────
-        bg2 = pygame.Surface((180, 26), pygame.SRCALPHA)
-        bg2.fill((0, 0, 0, 150))
-        surface.blit(bg2, (SCREEN_W - 188, 8))
-        draw_text(surface, f"Score: {superman.score:,}", font_med, GOLD, SCREEN_W - 184, 12, shadow=True)
-
-        # Rep bar
-        rep_ratio = superman.reputation / 100
-        rep_col = LIME if rep_ratio > 0.6 else (GOLD if rep_ratio > 0.3 else RED)
-        bg3 = pygame.Surface((180, 18), pygame.SRCALPHA)
-        bg3.fill((0, 0, 0, 150))
-        surface.blit(bg3, (SCREEN_W - 188, 38))
-        draw_text(surface, "Rep", font_tiny, LGRAY, SCREEN_W - 185, 41)
-        draw_bar(surface, SCREEN_W - 158, 41, 140, 10, rep_ratio, rep_col, (60, 30, 0))
-
-        # ── Power icons ───────────────────────────────────────────────────────
-        icon_y = SCREEN_H - 72
-        icon_sz = 56
-        # One row per power: (label, colour, cooldown 0..1, seconds remaining,
-        # key, duration 0..1 or None). Everything a power needs lives on its own
-        # line, so adding one is a single entry and an icon can't drift out of
-        # step with its own bar -- they used to be separate calls that repeated
-        # the label and colour, and a hardcoded bar index went stale the moment
-        # a power was inserted ahead of it. Cooldown ratio and seconds are both
-        # carried because they genuinely differ: Krypto reads fully dimmed while
-        # he's deployed, yet has no cooldown pending.
-        powers = [
-            ("HEAT\nVISN", FIRE_HOT, superman.heat_cd / superman.HEAT_CD,     superman.heat_cd,   "SPACE", None),
-            ("FRZE\nBRTH", ICE,      superman.freeze_cd / superman.FREEZE_CD, superman.freeze_cd, "F",     None),
-            ("SPNCH",      YELLOW_S, superman.punch_cd / superman.PUNCH_CD,   superman.punch_cd,  "Q",     None),
-            ("SPDS",       CYAN,     superman.speed_cd / superman.SPEED_CD,   superman.speed_cd,  "SHIFT",
-             superman.speed_remaining / superman.SPEED_DUR if superman.speed_remaining > 0 else None),
-            ("XRAY",       XRAY_C,   superman.xray_cd / superman.XRAY_CD,     superman.xray_cd,   "X",
-             superman.xray_remaining / superman.XRAY_DUR if superman.xray_remaining > 0 else None),
-        ]
-        # Defensive: the game always builds a Krypto, but the HUD should degrade
-        # to a missing icon rather than crash if that ever stops being true.
-        if krypto is not None:
-            powers.append(("KRYPTO", SILVER, krypto.cd_ratio, krypto.call_cd, "C",
-                           krypto.timer / krypto.ACTIVE_DUR if krypto.state == 'active' else None))
-
-        total_w = len(powers) * (icon_sz + 8) - 8
-        start_x = SCREEN_W // 2 - total_w // 2
-        for i, (label, col, cd_ratio, cd_secs, key, dur) in enumerate(powers):
-            ix = start_x + i * (icon_sz + 8)
-            cooldown_icon(surface, ix, icon_y, icon_sz, col, label, cd_ratio, key, cd_secs)
-            if dur is not None:
-                # After its own icon, so the bar lies over the dim overlay --
-                # the same order the separate bar pass produced.
-                pygame.draw.rect(surface, col, (ix, icon_y + icon_sz - 6, int(icon_sz * dur), 4))
-
-        # ── Active event banner ───────────────────────────────────────────────
-        if active_event:
-            name, hint = active_event.get_ui_text()
-            cat = active_event.category
-            col = CAT_COLORS[cat]
-            banner_w = 700
-            banner_h = 52
-            bx = SCREEN_W // 2 - banner_w // 2
-            by = SCREEN_H - 130
-            bg_s = pygame.Surface((banner_w, banner_h), pygame.SRCALPHA)
-            bg_s.fill((0, 0, 0, 170))
-            surface.blit(bg_s, (bx, by))
-            pygame.draw.rect(surface, col, (bx, by, banner_w, banner_h), 2)
-            draw_text(surface, name, font_large, col, SCREEN_W // 2, by + 12, center=True)
-            draw_text(surface, hint, font_tiny, LGRAY, SCREEN_W // 2, by + 36, center=True)
-
-        # ── Minimap ───────────────────────────────────────────────────────────
-        mm_surf = pygame.Surface((self.MINIMAP_W, self.MINIMAP_H), pygame.SRCALPHA)
-        mm_surf.fill((0, 0, 0, 180))
-        scale_x = self.MINIMAP_W / WORLD_W
-        scale_y = self.MINIMAP_H / WORLD_H
-        # Events
-        for ev in events:
-            if ev.complete or ev.failed:
-                continue
-            ex = int(ev.x * scale_x)
-            ey = int(ev.y * scale_y)
-            col = CAT_COLORS[ev.category]
-            a = int(150 + 105 * abs(math.sin(pygame.time.get_ticks() * 0.003)))
-            mm_dot = pygame.Surface((8, 8), pygame.SRCALPHA)
-            pygame.draw.circle(mm_dot, (*col, a), (4, 4), 4)
-            mm_surf.blit(mm_dot, (ex - 4, ey - 4))
-        # Superman
-        sx2 = int(superman.x * scale_x)
-        sy2 = int(superman.y * scale_y)
-        pygame.draw.circle(mm_surf, BLUE_S, (sx2, sy2), 3)
-        pygame.draw.circle(mm_surf, WHITE, (sx2, sy2), 3, 1)
-        # Viewport box
-        vx = int(camera.x * scale_x)
-        vy = int(camera.y * scale_y)
-        vw = int(SCREEN_W * scale_x)
-        vh = int(SCREEN_H * scale_y)
-        pygame.draw.rect(mm_surf, (*WHITE, 80), (vx, vy, vw, vh), 1)
-        pygame.draw.rect(mm_surf, WHITE, (0, 0, self.MINIMAP_W, self.MINIMAP_H), 1)
-        surface.blit(mm_surf, (self.MINIMAP_X, self.MINIMAP_Y))
-        draw_text(surface, "MAP", font_tiny, LGRAY, self.MINIMAP_X + 4, self.MINIMAP_Y + 2, shadow=False)
-
-        # ── Nearby event prompt ───────────────────────────────────────────────
-        for ev in events:
-            if ev.complete or ev.failed or ev.active:
-                continue
-            d = ev.dist_to(superman)
-            if d < ev.ACTIVATION_RADIUS:
-                alpha = int(255 * (1 - d / ev.ACTIVATION_RADIUS))
-                col = CAT_COLORS[ev.category]
-                msg = f"Fly into event area to respond: {ev.name}"
-                draw_text(surface, msg, font_small, (*col[:3], alpha), SCREEN_W // 2, SCREEN_H - 155, center=True)
-                break
 
 
 # ─── FLASH EFFECT ────────────────────────────────────────────────────────────
@@ -341,67 +71,6 @@ class ScreenFlash:
         if self.alpha > 0:
             self._surf.fill((*self.color[:3], int(self.alpha)))
             surface.blit(self._surf, (0, 0))
-
-
-# ─── TITLE VIDEO ──────────────────────────────────────────────────────────────
-
-class MenuVideo:
-    """Plays the title reveal as a sequence of pre-rendered frame images
-    (extracted once from the source mp4 via ffmpeg -- see Title Page/frames),
-    holding on the last frame (the "PRESS START" card) rather than looping.
-    Uses plain image loading rather than video decoding, so it works the same
-    in the desktop build and the pygbag/WASM web build, where opencv isn't
-    available. Falls back to no-op if the frames folder is missing."""
-
-    def __init__(self, frames_dir, frame_fps):
-        self._frames = []
-        self._index = 0
-        self._t = 0.0
-        self._frame_dt = 1.0 / frame_fps
-        self._done = False
-        self.surface = None
-        try:
-            names = sorted(f for f in os.listdir(frames_dir) if f.lower().endswith(".jpg"))
-            for name in names:
-                self._frames.append(pygame.image.load(os.path.join(frames_dir, name)).convert())
-        except Exception:
-            self._frames = []
-        if self._frames:
-            self._set_frame(0)
-
-    def _set_frame(self, index):
-        self._index = index
-        frame = self._frames[index]
-        if frame.get_size() != (SCREEN_W, SCREEN_H):
-            frame = pygame.transform.smoothscale(frame, (SCREEN_W, SCREEN_H))
-        self.surface = frame
-
-    def update(self, dt):
-        if not self._frames or self._done:
-            return
-        self._t += dt
-        while self._t >= self._frame_dt and not self._done:
-            self._t -= self._frame_dt
-            if self._index + 1 >= len(self._frames):
-                self.release()
-            else:
-                self._set_frame(self._index + 1)
-
-    def release(self):
-        """Free the intro frames, keeping the final "PRESS START" card.
-        Holds the last frame, not the current one, so quitting to the menu
-        mid-intro doesn't leave it stuck on a half-played frame."""
-        if self._frames:
-            self._set_frame(len(self._frames) - 1)
-        self._frames = []
-        self._index = 0
-        self._done = True
-
-    def draw(self, surface):
-        if self.surface is None:
-            return False
-        surface.blit(self.surface, (0, 0))
-        return True
 
 
 # ─── EFFECT LAYER ─────────────────────────────────────────────────────────────
@@ -485,9 +154,9 @@ class Game:
         self._spawn_cd = 3.0
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
-        self._wind_playing = False
-        self._heat_playing = False
-        self._freeze_playing = False
+        self.beam = BeamAudio()
+        self.wind = LoopingSound(audio.snd_wind)
+        self.freeze_loop = LoopingSound(audio.snd_freeze)
         self._shift_prev = False
         self._xray_prev = False
         self._c_prev = False
@@ -539,32 +208,21 @@ class Game:
         s.heat_firing = bool(keys[pygame.K_SPACE] or mouse_buttons[0])
         if s.heat_firing and s.heat_cd <= 0:
             s.try_heat_vision(all_enemies, self.pfs)
-        if snd_heat:
-            if s.heat_firing and not self._heat_playing:
-                snd_heat.play(loops=-1)
-                self._heat_playing = True
-            elif not s.heat_firing and self._heat_playing:
-                snd_heat.stop()
-                self._heat_playing = False
+        self.beam.update(
+            s.heat_firing, s.heat_firing and s.heat_beam_hits(all_enemies), dt)
 
         # Freeze Breath: F or RMB (held for a continuous frost cone)
         s.freeze_active = bool(keys[pygame.K_f] or mouse_buttons[2])
         if s.freeze_active and s.freeze_cd <= 0:
             s.try_freeze(all_enemies, self.pfs)
-        if snd_freeze:
-            if s.freeze_active and not self._freeze_playing:
-                snd_freeze.play(loops=-1)
-                self._freeze_playing = True
-            elif not s.freeze_active and self._freeze_playing:
-                snd_freeze.stop()
-                self._freeze_playing = False
+        self.freeze_loop.set(s.freeze_active)
 
         # Punch: Q
         if keys[pygame.K_q] and s.punch_cd <= 0:
             if s.try_punch(all_enemies, self.pfs):
                 self.flash.trigger(YELLOW_S, 60)
-                if snd_punch:
-                    snd_punch.play()
+                if audio.snd_punch:
+                    audio.snd_punch.play()
 
         # Speed: Shift (toggle on/off)
         shift_down = bool(keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
@@ -574,8 +232,8 @@ class Game:
             elif s.try_speed():
                 self.pfs.sonic_boom(s.x, s.y)
                 self.flash.trigger(CYAN, 70)
-                if snd_sprint:
-                    snd_sprint.play()
+                if audio.snd_sprint:
+                    audio.snd_sprint.play()
         self._shift_prev = shift_down
 
         # X-Ray Vision: X (one-shot burst, expires on its own)
@@ -585,8 +243,8 @@ class Game:
         if x_down and not self._xray_prev:
             if s.try_xray():
                 self.flash.trigger(XRAY_C, 50)
-                if snd_xray:
-                    snd_xray.play()
+                if audio.snd_xray:
+                    audio.snd_xray.play()
         self._xray_prev = x_down
 
         # Call Krypto: C (edge-triggered so a held key doesn't spam the notice)
@@ -601,17 +259,13 @@ class Game:
         s.update(dt, keys, mouse_world)
 
     def stop_sounds(self):
-        if snd_wind:
-            snd_wind.stop()
-        if snd_heat:
-            snd_heat.stop()
-        if snd_freeze:
-            snd_freeze.stop()
-        if snd_xray:
-            snd_xray.stop()
-        self._wind_playing = False
-        self._heat_playing = False
-        self._freeze_playing = False
+        """Silence everything the player is holding. Called on pause and death,
+        so it has to cover every sound that can outlive a single frame."""
+        self.wind.stop()
+        self.freeze_loop.stop()
+        self.beam.stop()
+        if audio.snd_xray:
+            audio.snd_xray.stop()
 
     def update(self, dt):
         s = self.superman
@@ -625,14 +279,7 @@ class Game:
         self.dialogue.update(dt)
 
         # Flying wind loop: on while actually moving, off when hovering
-        flying = math.hypot(s.vx, s.vy) > 0.8
-        if snd_wind:
-            if flying and not self._wind_playing:
-                snd_wind.play(loops=-1)
-                self._wind_playing = True
-            elif not flying and self._wind_playing:
-                snd_wind.stop()
-                self._wind_playing = False
+        self.wind.set(math.hypot(s.vx, s.vy) > 0.8)
 
         # Notifications
         self._notifications = [[t, c, ti - dt] for t, c, ti in self._notifications if ti - dt > 0]
@@ -724,8 +371,9 @@ class Game:
         if self.superman.heat_firing:
             sx = int(self.superman.head_pos[0] - self.camera.x)
             sy = int(self.superman.head_pos[1] - self.camera.y)
-            ex = int(sx + math.cos(self.superman.facing) * Superman.HEAT_RANGE)
-            ey = int(sy + math.sin(self.superman.facing) * Superman.HEAT_RANGE)
+            tx, ty = self.superman.heat_beam_target()   # same endpoint the hit test uses
+            ex = int(tx - self.camera.x)
+            ey = int(ty - self.camera.y)
             # Beam (layered glow, drawn every frame the trigger is held for a solid long beam)
             region = _effect_region([(sx, sy), (ex, ey)], 10)   # 10 clears the 16px line
             beam_surf = _effect_begin(region)
@@ -739,7 +387,7 @@ class Game:
         if self.superman.freeze_active:
             fx = int(self.superman.head_pos[0] - self.camera.x)
             fy = int(self.superman.head_pos[1] - self.camera.y)
-            angle = self.superman.facing
+            angle = self.superman.aim_angle()   # same angle the freeze test uses
             pts = [(fx, fy)]
             reach = Superman.FREEZE_RANGE
             for da in range(-45, 46, 5):
@@ -767,116 +415,7 @@ class Game:
             y = SCREEN_H // 2 - 60 - i * 32
             draw_text(screen, text, font_large, (*color[:3], alpha), SCREEN_W // 2, y, center=True)
 
-    def can_use_heat_vision(self):
-        return self.superman.heat_cd <= 0
 
-
-# ─── MENU ─────────────────────────────────────────────────────────────────────
-
-menu_video = MenuVideo(_TITLE_FRAMES_DIR, _TITLE_FRAME_FPS)
-
-# Held for the whole run rather than rebuilt per frame — a full-screen SRCALPHA
-# allocation every frame is the expensive path (see ScreenFlash).
-_pause_dim = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
-_pause_dim.fill((0, 0, 0, 160))
-
-PAUSE_ITEMS = ("Resume", "Exit Game")
-
-
-def draw_pause(selected):
-    """Menu over a dimmed still of the game. The caller draws the world first
-    and does the flip, so this only lays the dim and the text on top."""
-    screen.blit(_pause_dim, (0, 0))
-    t = pygame.time.get_ticks() / 1000
-    alpha = int(180 + 75 * abs(math.sin(t * 2)))
-
-    draw_text(screen, "PAUSED", font_xl, GOLD, SCREEN_W // 2, 220, center=True)
-    for i, label in enumerate(PAUSE_ITEMS):
-        y = 330 + i * 56
-        if i == selected:
-            draw_text(screen, f"> {label} <", font_large, (*GOLD[:3], alpha),
-                      SCREEN_W // 2, y, center=True)
-        else:
-            draw_text(screen, label, font_large, LGRAY, SCREEN_W // 2, y, center=True)
-
-    # Sits under the items rather than at the foot of the screen — the HUD's
-    # power-icon row lives down there and the two overlap illegibly.
-    draw_text(screen, "UP/DOWN: Select   ENTER: Confirm   ESC: Resume",
-              font_small, LGRAY, SCREEN_W // 2, 470, center=True)
-
-
-def draw_menu():
-    t = pygame.time.get_ticks() / 1000
-    alpha = int(180 + 75 * abs(math.sin(t * 2)))
-
-    if menu_video.draw(screen):
-        # Video already carries the title, skyline and its own "press start"
-        # card, so just add a slim functional footer with the real key binds.
-        foot_bg = pygame.Surface((SCREEN_W, 34), pygame.SRCALPHA)
-        foot_bg.fill((0, 0, 0, 130))
-        screen.blit(foot_bg, (0, SCREEN_H - 34))
-        draw_text(screen, "WASD/Arrows: Fly   Mouse: Aim   ENTER: Begin   ESC: Quit",
-                  font_small, (*GOLD[:3], alpha), SCREEN_W // 2, SCREEN_H - 17, center=True)
-    else:
-        # Fallback if the video/opencv isn't available
-        screen.fill(SKY)
-        # City silhouette
-        for i in range(20):
-            bw = random.randint(40, 90)
-            bh = random.randint(80, 280)
-            bx = i * 65 - 10
-            by = SCREEN_H - bh - 30
-            pygame.draw.rect(screen, (30, 32, 38), (bx, by, bw, bh))
-        # Stars
-        for i in range(60):
-            sx2 = (i * 137) % SCREEN_W
-            sy2 = (i * 97) % (SCREEN_H // 2)
-            pygame.draw.circle(screen, WHITE, (sx2, sy2), 1)
-
-        # Title
-        draw_text(screen, "SUPERMAN", font_xl, YELLOW_S, SCREEN_W // 2, 130, center=True)
-        draw_text(screen, "Guardian of Metropolis", font_large, BLUE_S, SCREEN_W // 2, 200, center=True)
-
-        # Controls box
-        bx2, by2 = SCREEN_W // 2 - 300, 250
-        box_h = 300          # 8 rows at 36px from by2+16 end at ~by2+285
-        bg = pygame.Surface((600, box_h), pygame.SRCALPHA)
-        bg.fill((0, 0, 0, 160))
-        screen.blit(bg, (bx2, by2))
-        pygame.draw.rect(screen, BLUE_S, (bx2, by2, 600, box_h), 2)
-        controls = [
-            ("WASD / Arrows", "Fly"),
-            ("Space / Left Click", "Heat Vision (hold)"),
-            ("F / Right Click", "Freeze Breath"),
-            ("Q", "Super Punch (dash to enemy)"),
-            ("Shift", "Super Speed"),
-            ("X", "X-Ray Vision (burst)"),
-            ("C", "Call Krypto (temporary ally)"),
-            ("Mouse", "Aim direction"),
-        ]
-        for i, (key, desc) in enumerate(controls):
-            y = by2 + 16 + i * 36
-            draw_text(screen, key, font_small, YELLOW_S, bx2 + 20, y)
-            draw_text(screen, desc, font_small, WHITE, bx2 + 220, y)
-
-        # Start prompt
-        draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 585, center=True)
-        draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 630, center=True)
-
-    pygame.display.flip()
-
-
-def draw_game_over(score, reputation):
-    screen.fill((10, 0, 20))
-    draw_text(screen, "SUPERMAN HAS FALLEN", font_xl, RED, SCREEN_W // 2, 200, center=True)
-    draw_text(screen, "Metropolis is in danger...", font_large, LGRAY, SCREEN_W // 2, 280, center=True)
-    draw_text(screen, f"Final Score: {score:,}", font_large, GOLD, SCREEN_W // 2, 360, center=True)
-    draw_text(screen, f"Reputation: {reputation}/100", font_large, LGRAY, SCREEN_W // 2, 410, center=True)
-    t = pygame.time.get_ticks() / 1000
-    alpha = int(180 + 75 * abs(math.sin(t * 2)))
-    draw_text(screen, "Press ENTER to play again", font_large, (*WHITE[:3], alpha), SCREEN_W // 2, 500, center=True)
-    draw_text(screen, "ESC for menu", font_small, LGRAY, SCREEN_W // 2, 550, center=True)
-    pygame.display.flip()
 
 
 # ─── ENTRY POINT ─────────────────────────────────────────────────────────────
@@ -923,7 +462,7 @@ async def main():
                     game = start_game()
                     state = 'play'
             menu_video.update(dt)
-            draw_menu()
+            draw_menu(screen)
 
         elif state == 'play':
             escape = any(e.type == pygame.KEYDOWN and e.key == pygame.K_ESCAPE for e in events)
@@ -938,8 +477,8 @@ async def main():
             elif not game.superman.alive:
                 game.stop_sounds()
                 stop_music()
-                if snd_gameover:
-                    snd_gameover.play()
+                if audio.snd_gameover:
+                    audio.snd_gameover.play()
                 state = 'gameover'
             else:
                 game.update(dt)
@@ -969,7 +508,7 @@ async def main():
                         state = 'menu'
             if state == 'pause':
                 game.draw()
-                draw_pause(pause_sel)
+                draw_pause(screen, pause_sel)
                 pygame.display.flip()
 
         elif state == 'gameover':
@@ -981,7 +520,7 @@ async def main():
                     if event.key == pygame.K_ESCAPE:
                         play_menu_music()
                         state = 'menu'
-            draw_game_over(game.superman.score, game.superman.reputation)
+            draw_game_over(screen, game.superman.score, game.superman.reputation)
 
         await asyncio.sleep(0)
 

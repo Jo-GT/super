@@ -200,6 +200,7 @@ class Superman:
         self.heat_firing = False
         self.freeze_active = False
         self.head_pos = (self.x, self.y)
+        self.aim_world = None    # last cursor position, for aiming the beam
 
         # Sprites: flying (moving), hover (idle), death
         self._sprite_fly   = Superman._load_sprite("superman flying.png",          (96, 44))
@@ -262,6 +263,7 @@ class Superman:
         dy = mouse_world[1] - self.y
         if dx * dx + dy * dy > 4:
             self.facing = math.atan2(dy, dx)
+        self.aim_world = mouse_world
 
         # Movement
         spd = self.SPEED * (3.0 if self.speed_remaining > 0 else 1.0)
@@ -292,16 +294,46 @@ class Superman:
 
     # ── Powers ────────────────────────────────────────────────────────────────
 
-    def can_use_heat_vision(self):
-        return self.heat_cd <= 0
+    def aim_angle(self):
+        """Direction from the head to the cursor, for anything fired from it.
+
+        Deliberately not self.facing: that is measured from the body centre and
+        drives the sprite. Heat vision and freeze breath both leave the head, so
+        aiming them along facing sent them parallel to the body-to-cursor line
+        but offset from it by the head offset, and they visibly missed what you
+        were pointing at.
+        """
+        if self.aim_world is None:
+            return self.facing
+        dx = self.aim_world[0] - self.head_pos[0]
+        dy = self.aim_world[1] - self.head_pos[1]
+        if dx * dx + dy * dy < 4:      # cursor on the head; no meaningful angle
+            return self.facing
+        return math.atan2(dy, dx)
+
+    def heat_beam_target(self):
+        """Far end of the beam: out from the head, through the cursor, to range."""
+        a = self.aim_angle()
+        hx, hy = self.head_pos
+        return (hx + math.cos(a) * self.HEAT_RANGE,
+                hy + math.sin(a) * self.HEAT_RANGE)
+
+    def heat_beam_hits(self, enemies):
+        """Whether the beam is touching anything right now.
+
+        Deliberately separate from try_heat_vision's damage pass, which is
+        rate-limited to HEAT_CD (12.5Hz). The contact sound wants a per-frame
+        answer or it lags the visual by up to 80ms.
+        """
+        tx, ty = self.heat_beam_target()
+        return any(self._in_beam(e.x, e.y, tx, ty, 28) for e in enemies)
 
     def try_heat_vision(self, enemies, particles):
         if self.heat_cd > 0:
             return
         self.heat_cd = self.HEAT_CD
         hx, hy = self.head_pos
-        tx = hx + math.cos(self.facing) * self.HEAT_RANGE
-        ty = hy + math.sin(self.facing) * self.HEAT_RANGE
+        tx, ty = self.heat_beam_target()
         particles.heat_beam(hx, hy, tx, ty)
         for e in enemies:
             if self._in_beam(e.x, e.y, tx, ty, 28):
@@ -312,14 +344,15 @@ class Superman:
             return False
         self.freeze_cd = self.FREEZE_CD
         hx, hy = self.head_pos
-        particles.frost_breath(hx, hy, self.facing, self.FREEZE_RANGE)
+        aim = self.aim_angle()
+        particles.frost_breath(hx, hy, aim, self.FREEZE_RANGE)
         for e in enemies:
             dx = e.x - hx
             dy = e.y - hy
             d = math.hypot(dx, dy)
             if d < self.FREEZE_RANGE:
                 a = math.atan2(dy, dx)
-                diff = abs((a - self.facing + math.pi) % (2 * math.pi) - math.pi)
+                diff = abs((a - aim + math.pi) % (2 * math.pi) - math.pi)
                 if diff < 0.75:
                     e.freeze(self.FREEZE_LOCK)
         return True
@@ -396,7 +429,7 @@ class Superman:
         if d > self.FREEZE_RANGE:
             return False
         a = math.atan2(dy, dx)
-        diff = abs((a - self.facing + math.pi) % (2 * math.pi) - math.pi)
+        diff = abs((a - self.aim_angle() + math.pi) % (2 * math.pi) - math.pi)
         return diff < 0.75
 
     def draw(self, surface, cam):

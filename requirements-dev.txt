@@ -1,0 +1,11 @@
+# Development and tooling dependencies. The game itself needs only
+# requirements.txt; nothing here ships in the web build.
+-r requirements.txt
+
+# Test suite (tests/).
+pytest>=8.0
+
+# tools/build_heatvision_clips.py and tools/build_contact_sizzle.py, which cut
+# and synthesise the beam audio. Those also need ffmpeg on PATH, which pip
+# cannot provide -- install it through your package manager.
+numpy>=2.0
