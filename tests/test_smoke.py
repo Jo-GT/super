@@ -57,9 +57,9 @@ def test_idle_frames(game):
 
 def test_holding_heat_vision(game, monkeypatch):
     _run(game, held=(pygame.K_SPACE,), monkeypatch=monkeypatch)
-    assert game._heat_phase == 'loop', (
+    assert game.beam.phase == 'loop', (
         "the beam should have handed over from the intro clip to the looping "
-        f"body within {FRAMES} frames, but phase is {game._heat_phase!r}"
+        f"body within {FRAMES} frames, but phase is {game.beam.phase!r}"
     )
 
 
@@ -72,8 +72,8 @@ def test_release_stops_the_beam(game, monkeypatch):
     _run(game, frames=120, held=(pygame.K_SPACE,), monkeypatch=monkeypatch)
     monkeypatch.setattr(pygame.key, "get_pressed", lambda: _Keys())
     _run(game, frames=30)
-    assert game._heat_phase is None
-    assert not game._sizzle_playing
+    assert game.beam.phase is None
+    assert not game.beam.sizzling
 
 
 def test_stop_sounds_resets_beam_state(game, monkeypatch):
@@ -81,11 +81,11 @@ def test_stop_sounds_resets_beam_state(game, monkeypatch):
     beam can never restart."""
     _run(game, frames=120, held=(pygame.K_SPACE,), monkeypatch=monkeypatch)
     game.stop_sounds()
-    assert game._heat_phase is None
-    assert game._heat_contact_t == 0
-    assert not game._sizzle_playing
-    assert not game._wind_playing
-    assert not game._freeze_playing
+    assert game.beam.phase is None
+    assert game.beam._contact_t == 0
+    assert not game.beam.sizzling
+    assert not game.wind.playing
+    assert not game.freeze_loop.playing
 
 
 def test_beam_passes_through_the_cursor(game):

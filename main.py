@@ -18,6 +18,9 @@ import random
 import asyncio
 import os
 
+import audio
+from audio import (BeamAudio, LoopingSound, duck_music, play_bgm_music,
+                   play_menu_music, stop_music, unduck_music)
 from constants import *
 from city import City
 from particles import ParticleSystem
@@ -45,111 +48,6 @@ except Exception:
     font_med   = pygame.font.Font(None, 22)
     font_small = pygame.font.Font(None, 17)
     font_tiny  = pygame.font.Font(None, 14)
-
-# ─── SOUND ────────────────────────────────────────────────────────────────────
-
-_SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Sounds")
-
-
-def _load_sound(filename):
-    try:
-        return pygame.mixer.Sound(os.path.join(_SOUNDS_DIR, filename))
-    except Exception:
-        return None
-
-
-snd_wind      = _load_sound("flying wind noise.ogg")
-snd_sprint    = _load_sound("beginsprint.ogg")
-snd_freeze    = _load_sound("freeze breath.ogg")
-snd_punch     = _load_sound("punch.ogg")
-snd_xray      = _load_sound("xrayvision.ogg")
-snd_gameover  = _load_sound("GameOver.ogg")
-
-# Heat vision is held down, so its sound has to sustain for as long as the
-# player likes. The original heatvision.ogg is a self-contained 4s one-shot —
-# charge-up, swell, blast, fade — so looping it whole replayed the swell and
-# the fade every 4 seconds instead of holding a steady beam. It is split into
-# three clips: an intro, a body that loops seamlessly, and a tail-off played
-# on release. The intro opens on the blast already at full volume; two gentler
-# starts were tried and rejected, and tools/build_heatvision_clips.py still
-# carries their cut points if either is ever wanted back.
-snd_heat_intro  = _load_sound("heatvision-intro.ogg")
-snd_heat_loop   = _load_sound("heatvision-loop.ogg")
-snd_heat_tail   = _load_sound("heatvision-tail.ogg")
-snd_heat_sizzle = _load_sound("heatvision-sizzle.ogg")
-
-# The sizzle layers on top of the body loop while the beam is burning something,
-# rather than replacing it. Swapping the body out would mean crossfading between
-# two slices of the same tonal clip at an arbitrary moment, which comb-filters
-# badly (up to 4.5dB swings depending where the switch lands); the sizzle is
-# uncorrelated noise, so it just adds.
-#
-# Contact is held briefly after the last hit. Without that, sweeping the beam
-# across enemies flickers the layer on and off several times a second.
-HEAT_CONTACT_HOLD = 0.20    # seconds to keep the sizzle up after the last hit
-HEAT_SIZZLE_FADE = 60       # ms, in and out
-HEAT_SIZZLE_VOLUME = 0.75   # the clip is built hot; balance it against the beam
-                            # here rather than baking it in, so the asset keeps
-                            # its headroom and this stays easy to nudge.
-
-if snd_heat_sizzle:
-    snd_heat_sizzle.set_volume(HEAT_SIZZLE_VOLUME)
-
-# The intro clips run on into the blast and fade out over their final
-# HEAT_LOOP_LEAD_IN seconds, so the looping body is faded in underneath them
-# over the same window rather than stacking at full volume (which clipped).
-# The window is also wide enough to absorb frame-timing jitter — the handover
-# can only ever land late, and landing late just shortens the crossfade.
-HEAT_LOOP_LEAD_IN = 0.12
-
-_MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.ogg")
-_BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.ogg")
-_BGM_VOLUME      = 0.55
-_PAUSE_DUCK      = 0.2   # fraction of normal volume while the pause menu is up
-_current_music = None  # 'menu' | 'bgm' | None
-
-
-def _play_music(path, volume, tag):
-    global _current_music
-    if _current_music == tag:
-        return
-    try:
-        pygame.mixer.music.load(path)
-        pygame.mixer.music.set_volume(volume)
-        pygame.mixer.music.play(loops=-1)
-        _current_music = tag
-    except Exception:
-        pass
-
-
-def play_menu_music():
-    _play_music(_MENU_MUSIC_PATH, 1.0, 'menu')
-
-
-def play_bgm_music():
-    _play_music(_BGM_MUSIC_PATH, _BGM_VOLUME, 'bgm')
-
-
-def duck_music():
-    """Drop the music under the pause menu. _play_music won't reset the volume
-    on the way back out (same tag = no-op), so resuming must unduck explicitly."""
-    try:
-        pygame.mixer.music.set_volume(_BGM_VOLUME * _PAUSE_DUCK)
-    except Exception:
-        pass
-
-
-def unduck_music():
-    try:
-        pygame.mixer.music.set_volume(_BGM_VOLUME)
-    except Exception:
-        pass
-
-
-def stop_music():
-    global _current_music
-    pygame.mixer.music.stop()
-    _current_music = None
 
 
 # ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -517,12 +415,9 @@ class Game:
         self._spawn_cd = 3.0
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
-        self._wind_playing = False
-        self._heat_phase = None   # None | 'intro' | 'loop'
-        self._heat_t = 0.0        # seconds into the intro clip
-        self._heat_contact_t = 0.0  # time left on the contact hold
-        self._sizzle_playing = False
-        self._freeze_playing = False
+        self.beam = BeamAudio()
+        self.wind = LoopingSound(audio.snd_wind)
+        self.freeze_loop = LoopingSound(audio.snd_freeze)
         self._shift_prev = False
         self._xray_prev = False
         self._c_prev = False
@@ -574,27 +469,21 @@ class Game:
         s.heat_firing = bool(keys[pygame.K_SPACE] or mouse_buttons[0])
         if s.heat_firing and s.heat_cd <= 0:
             s.try_heat_vision(all_enemies, self.pfs)
-        self._update_heat_audio(
+        self.beam.update(
             s.heat_firing, s.heat_firing and s.heat_beam_hits(all_enemies), dt)
 
         # Freeze Breath: F or RMB (held for a continuous frost cone)
         s.freeze_active = bool(keys[pygame.K_f] or mouse_buttons[2])
         if s.freeze_active and s.freeze_cd <= 0:
             s.try_freeze(all_enemies, self.pfs)
-        if snd_freeze:
-            if s.freeze_active and not self._freeze_playing:
-                snd_freeze.play(loops=-1)
-                self._freeze_playing = True
-            elif not s.freeze_active and self._freeze_playing:
-                snd_freeze.stop()
-                self._freeze_playing = False
+        self.freeze_loop.set(s.freeze_active)
 
         # Punch: Q
         if keys[pygame.K_q] and s.punch_cd <= 0:
             if s.try_punch(all_enemies, self.pfs):
                 self.flash.trigger(YELLOW_S, 60)
-                if snd_punch:
-                    snd_punch.play()
+                if audio.snd_punch:
+                    audio.snd_punch.play()
 
         # Speed: Shift (toggle on/off)
         shift_down = bool(keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT])
@@ -604,8 +493,8 @@ class Game:
             elif s.try_speed():
                 self.pfs.sonic_boom(s.x, s.y)
                 self.flash.trigger(CYAN, 70)
-                if snd_sprint:
-                    snd_sprint.play()
+                if audio.snd_sprint:
+                    audio.snd_sprint.play()
         self._shift_prev = shift_down
 
         # X-Ray Vision: X (one-shot burst, expires on its own)
@@ -615,8 +504,8 @@ class Game:
         if x_down and not self._xray_prev:
             if s.try_xray():
                 self.flash.trigger(XRAY_C, 50)
-                if snd_xray:
-                    snd_xray.play()
+                if audio.snd_xray:
+                    audio.snd_xray.play()
         self._xray_prev = x_down
 
         # Call Krypto: C (edge-triggered so a held key doesn't spam the notice)
@@ -630,92 +519,14 @@ class Game:
 
         s.update(dt, keys, mouse_world)
 
-    def _update_heat_audio(self, firing, contact, dt):
-        """Drive the beam sound: intro, looping body, tail-off, sizzle layer.
-
-        The trigger is a level read, so this tracks how far through that
-        sequence we are rather than a single is-it-playing flag.
-        """
-        if snd_heat_loop is None:
-            return
-
-        if not firing:
-            if self._heat_phase is not None:
-                # Only tail off from a blast the player actually heard; an
-                # intro cut short is its own ending.
-                self._stop_heat_audio(tail=self._heat_phase == 'loop')
-            return
-
-        self._update_heat_sizzle(contact, dt)
-
-        if self._heat_phase is None:
-            if snd_heat_intro:
-                snd_heat_intro.play()
-                self._heat_phase = 'intro'
-                self._heat_t = 0.0
-            else:
-                snd_heat_loop.play(loops=-1)
-                self._heat_phase = 'loop'
-        elif self._heat_phase == 'intro':
-            self._heat_t += dt
-            if self._heat_t >= snd_heat_intro.get_length() - HEAT_LOOP_LEAD_IN:
-                snd_heat_loop.play(loops=-1, fade_ms=int(HEAT_LOOP_LEAD_IN * 1000))
-                self._heat_phase = 'loop'
-
-    def _update_heat_sizzle(self, contact, dt):
-        """Fade the burning-something layer in and out under the beam."""
-        if snd_heat_sizzle is None:
-            return
-        if contact:
-            self._heat_contact_t = HEAT_CONTACT_HOLD
-        else:
-            self._heat_contact_t = max(0.0, self._heat_contact_t - dt)
-
-        want = self._heat_contact_t > 0
-        if want and not self._sizzle_playing:
-            snd_heat_sizzle.play(loops=-1, fade_ms=HEAT_SIZZLE_FADE)
-            self._sizzle_playing = True
-        elif not want and self._sizzle_playing:
-            snd_heat_sizzle.fadeout(HEAT_SIZZLE_FADE)
-            self._sizzle_playing = False
-
-    def _stop_heat_audio(self, tail=False):
-        """Release the beam. With tail=True it fades into the tail-off clip;
-        without, everything cuts immediately (pause, death)."""
-        for snd in (snd_heat_intro, snd_heat_loop):
-            if not snd:
-                continue
-            if tail:
-                # Fade rather than cut: the body loops at full volume, so
-                # stopping it dead mid-waveform clicks.
-                snd.fadeout(25)
-            else:
-                snd.stop()
-        if snd_heat_tail:
-            if tail:
-                snd_heat_tail.play()
-            else:
-                snd_heat_tail.stop()
-        if snd_heat_sizzle:
-            if tail:
-                snd_heat_sizzle.fadeout(HEAT_SIZZLE_FADE)
-            else:
-                snd_heat_sizzle.stop()
-        self._heat_phase = None
-        self._heat_t = 0.0
-        self._heat_contact_t = 0.0
-        self._sizzle_playing = False
-
     def stop_sounds(self):
-        if snd_wind:
-            snd_wind.stop()
-        self._stop_heat_audio()
-        if snd_freeze:
-            snd_freeze.stop()
-        if snd_xray:
-            snd_xray.stop()
-        self._wind_playing = False
-        self._freeze_playing = False
+        """Silence everything the player is holding. Called on pause and death,
+        so it has to cover every sound that can outlive a single frame."""
+        self.wind.stop()
+        self.freeze_loop.stop()
+        self.beam.stop()
+        if audio.snd_xray:
+            audio.snd_xray.stop()
 
     def update(self, dt):
         s = self.superman
@@ -729,14 +540,7 @@ class Game:
         self.dialogue.update(dt)
 
         # Flying wind loop: on while actually moving, off when hovering
-        flying = math.hypot(s.vx, s.vy) > 0.8
-        if snd_wind:
-            if flying and not self._wind_playing:
-                snd_wind.play(loops=-1)
-                self._wind_playing = True
-            elif not flying and self._wind_playing:
-                snd_wind.stop()
-                self._wind_playing = False
+        self.wind.set(math.hypot(s.vx, s.vy) > 0.8)
 
         # Notifications
         self._notifications = [[t, c, ti - dt] for t, c, ti in self._notifications if ti - dt > 0]
@@ -1040,8 +844,8 @@ async def main():
             elif not game.superman.alive:
                 game.stop_sounds()
                 stop_music()
-                if snd_gameover:
-                    snd_gameover.play()
+                if audio.snd_gameover:
+                    audio.snd_gameover.play()
                 state = 'gameover'
             else:
                 game.update(dt)

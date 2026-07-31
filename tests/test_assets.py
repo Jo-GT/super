@@ -1,20 +1,24 @@
 """Guards against a silently missing sound.
 
-`_load_sound` swallows every exception and returns None, and every call site
+`load_sound` swallows every exception and returns None, and every call site
 null-checks, so a renamed or corrupt .ogg degrades to silence with no error
 anywhere - no crash, no log, nothing. That is the failure this file exists to
 catch, and the reason it asserts on loaded Sound objects rather than on paths:
 a path check would pass on a file that is present but unreadable.
+
+It imports `audio` rather than `main`, so it needs no display and covers the
+case where audio.py is loaded on its own - which is real, because main.py
+imports it before calling pygame.init().
 """
 from pathlib import Path
 
 import pytest
 
-import main
+import audio
 
-SOUNDS = Path(main._SOUNDS_DIR)
+SOUNDS = Path(audio.SOUNDS_DIR)
 
-# Every module-level Sound the game plays. If you add one, add it here.
+# Every module-level Sound in audio.py. If you add one, add it here.
 REQUIRED_SOUNDS = [
     "snd_wind",
     "snd_sprint",
@@ -42,19 +46,20 @@ NOT_LOADED_AT_RUNTIME = {
 
 @pytest.mark.parametrize("name", REQUIRED_SOUNDS)
 def test_sound_loaded(name):
-    assert hasattr(main, name), f"main.{name} is gone - was it renamed?"
-    snd = getattr(main, name)
+    assert hasattr(audio, name), f"audio.{name} is gone - was it renamed?"
+    snd = getattr(audio, name)
     assert snd is not None, (
-        f"main.{name} is None: _load_sound swallowed a failure. The file is "
-        f"missing, misnamed or unreadable, and the game would run silently."
+        f"audio.{name} is None: load_sound swallowed a failure. The file is "
+        f"missing, misnamed or unreadable, or the mixer was not up when this "
+        f"module was imported. Either way the game would run silently."
     )
-    assert snd.get_length() > 0, f"main.{name} loaded but is empty"
+    assert snd.get_length() > 0, f"audio.{name} loaded but is empty"
 
 
 def test_music_tracks_exist():
     """Music goes through pygame.mixer.music, which takes a path, so these
     cannot be checked by loading a Sound."""
-    for path in (main._MENU_MUSIC_PATH, main._BGM_MUSIC_PATH):
+    for path in (audio.MENU_MUSIC_PATH, audio.BGM_MUSIC_PATH):
         assert Path(path).is_file(), f"missing music track: {path}"
 
 
