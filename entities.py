@@ -976,8 +976,8 @@ class Krypto:
         if not Krypto._loaded:
             Krypto._run_frames  = _load_krypto_frames("krypto running sprite sheet.png", 5)
             Krypto._bite_frames = _load_krypto_frames("krypto bite sprite sheet.png", 5)
-            Krypto._snd_whistle = _load_krypto_sound("krypto whistle.mp3")
-            Krypto._snd_bark    = _load_krypto_sound("krypto bark.mp3")
+            Krypto._snd_whistle = _load_krypto_sound("krypto whistle.ogg")
+            Krypto._snd_bark    = _load_krypto_sound("krypto bark.ogg")
             Krypto._loaded = True
 
         self.state = 'idle'  # idle | calling | incoming | active
