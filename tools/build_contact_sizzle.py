@@ -8,9 +8,9 @@ against the beam instead of the other way round.
 It is built to sit *on top of* heatvision-loop.ogg, which meant two constraints:
 
 * It must not be another slice of heatvision.ogg. Anything cut from that clip
-  correlates with the body loop and comb-filters when the two are summed - the
-  same problem that ruled out crossfading to heatvision-contact.ogg. Noise from
-  a different source is uncorrelated, so it simply adds.
+  correlates with the body loop and comb-filters when the two are summed, by up
+  to 4.5dB depending where they line up. Noise from a different source is
+  uncorrelated, so it simply adds.
 * It sits above the beam in the spectrum (emphasis 1.5-9kHz, rolled off below)
   so it reads as extra bite rather than muddying the body, whose energy is
   centred around 4.6kHz with a strong low fundamental.

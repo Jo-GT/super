@@ -34,13 +34,11 @@ REQUIRED_SOUNDS = [
 
 # Present on disk but deliberately never loaded at runtime. Asserted explicitly
 # so that neither "everything in Sounds/ must load" nor "anything unloaded is
-# dead" gets applied to them by mistake.
+# dead" gets applied to it by mistake.
 NOT_LOADED_AT_RUNTIME = {
-    # Build input for tools/build_heatvision_clips.py, which cuts the four
-    # runtime clips out of it.
+    # Build input for tools/build_heatvision_clips.py, which cuts the three
+    # runtime beam clips out of it.
     "heatvision.ogg",
-    # Cut deliberately and reserved for a future beam-hitting-something sound.
-    "heatvision-contact.ogg",
 }
 
 

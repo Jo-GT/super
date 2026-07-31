@@ -51,7 +51,6 @@ SWELL_START = 0.180     # ramp up to the blast begins   } starts; see docstring
 PUNCH_START = 0.360     # the blast lands, at full volume - no ramp before it
 LOOP_START = 1.066      # see below; the intro runs to here
 LOOP_END = 2.056330     # chosen by correlation against LOOP_START
-CONTACT_END = 3.069000  # ditto, against LOOP_END
 TAIL_START = 3.575      # the blast begins decaying
 TAIL_END = 4.020
 
@@ -63,11 +62,10 @@ TAIL_END = 4.020
 # 1.066-3.070s is the flat middle of the blast, and its loudest moment falls
 # mid-loop rather than on the seam, so nothing draws the ear to the wrap.
 #
-# That middle is split in two at LOOP_END. The first half is the beam's idle
-# hum; the second has a different character and is cut as a separate loop,
-# heatvision-contact.ogg, held back for a beam-hitting-something sound. Nothing
-# plays it yet. The two are contiguous, and each is independently phase-aligned
-# so either can loop on its own.
+# LOOP_END stops halfway through that middle rather than running to 3.070s. The
+# second half carries most of the variation; dropping it took the spread across
+# loop positions from 2.7dB to 0.8dB, and tightened the phase correlation at the
+# splice from 0.86 to 0.93.
 
 HANDOVER = 0.120        # intro fade-out, mirrored by HEAT_LOOP_LEAD_IN in main.py
 WRAP = 0.020            # loop wrap-around blend
@@ -149,7 +147,6 @@ def main() -> None:
     print(f"{SRC.name}: {len(x)/SR:.3f}s")
     build_intro(x, PUNCH_START, "heatvision-intro.ogg", fade_in=PUNCH_FADE_IN)
     build_loop(x, LOOP_START, LOOP_END, "heatvision-loop.ogg")
-    build_loop(x, LOOP_END, CONTACT_END, "heatvision-contact.ogg")
     build_tail(x)
 
 
