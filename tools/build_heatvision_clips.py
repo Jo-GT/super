@@ -38,10 +38,18 @@ SRC = SOUNDS / "heatvision.ogg"
 
 CHARGE_START = 0.000    # quiet charge-up begins
 SWELL_START = 0.180     # ramp up to the blast begins
-BLAST_START = 0.600     # first fully-sustained sample; also the loop start
-LOOP_END = 2.637896     # chosen by correlation against BLAST_START
+LOOP_START = 1.066      # see below; the intro runs to here
+LOOP_END = 3.070        # chosen by correlation against LOOP_START
 TAIL_START = 3.575      # the blast begins decaying
 TAIL_END = 4.020
+
+# LOOP_START is deliberately well past the start of the blast (~0.36s). The
+# blast is not a smooth drone: its first 0.4s is the swell ringing out, 3-4dB
+# hotter than the rest, and the stretch after it dips. Looping from there put
+# that accent-then-drop at the top of every repeat, which is heard as the swell
+# and tail-off coming back round even though the splice itself is seamless.
+# 1.066-3.070s is the flat middle of the blast, and its loudest moment falls
+# mid-loop rather than on the seam, so nothing draws the ear to the wrap.
 
 HANDOVER = 0.120        # intro fade-out, mirrored by HEAT_LOOP_LEAD_IN in main.py
 WRAP = 0.020            # loop wrap-around blend
@@ -79,7 +87,7 @@ def build_intro(x: np.ndarray, start: float, name: str) -> None:
     pygame fades the body in linearly, so this fades out as sqrt(1 - t**2):
     the two then sum to constant power for arbitrary relative phase.
     """
-    clip = x[int(start * SR):int(BLAST_START * SR)].copy()
+    clip = x[int(start * SR):int(LOOP_START * SR)].copy()
     d = int(HANDOVER * SR)
     t = np.linspace(0, 1, d, endpoint=False)[:, None]
     clip[-d:] *= np.sqrt(1 - t ** 2)
@@ -87,7 +95,7 @@ def build_intro(x: np.ndarray, start: float, name: str) -> None:
 
 
 def build_loop(x: np.ndarray) -> None:
-    s, e, d = int(BLAST_START * SR), int(LOOP_END * SR), int(WRAP * SR)
+    s, e, d = int(LOOP_START * SR), int(LOOP_END * SR), int(WRAP * SR)
     body = x[s - d:e - d].copy()
     wrap = x[e - d:e]                 # phase-aligned with body[:d]
     t = np.linspace(0, 1, d, endpoint=False)[:, None]
