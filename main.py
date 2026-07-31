@@ -70,14 +70,10 @@ snd_gameover  = _load_sound("GameOver.ogg")
 # charge-up, swell, blast, fade — so looping it whole replayed the swell and
 # the fade every 4 seconds instead of holding a steady beam. It is split into
 # three clips: an intro, a body that loops seamlessly, and a tail-off played
-# on release.
-#
-# Three intros are available. "full" opens with the quiet charge-up before the
-# swell; "swell" skips the charge and leads with the swell itself; "punch"
-# skips the ramp too and opens on the blast already at full volume.
-HEAT_INTRO_VARIANT = "punch"   # "full" | "swell" | "punch"
-
-snd_heat_intro  = _load_sound(f"heatvision-intro-{HEAT_INTRO_VARIANT}.ogg")
+# on release. The intro opens on the blast already at full volume; two gentler
+# starts were tried and rejected, and tools/build_heatvision_clips.py still
+# carries their cut points if either is ever wanted back.
+snd_heat_intro  = _load_sound("heatvision-intro.ogg")
 snd_heat_loop   = _load_sound("heatvision-loop.ogg")
 snd_heat_tail   = _load_sound("heatvision-tail.ogg")
 snd_heat_sizzle = _load_sound("heatvision-sizzle.ogg")

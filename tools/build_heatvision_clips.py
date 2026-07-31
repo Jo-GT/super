@@ -6,9 +6,11 @@ fade-out. Heat vision is held down, though, so looping that whole clip replayed
 the swell and the fade every 4 seconds instead of sustaining. Instead it is cut
 into an intro, a body that loops, and a tail-off played on release.
 
-Three intros are produced: "full" keeps the quiet charge-up, "swell" starts at
-the swell, "punch" skips the ramp entirely and opens on the blast landing.
-main.py picks between them with HEAT_INTRO_VARIANT.
+The intro is cut from PUNCH_START, opening on the blast already at full volume.
+Two earlier cuts were tried and rejected: CHARGE_START keeps the quiet charge-up
+before the swell, SWELL_START keeps the swell but not the charge. Both are still
+defined below, so either can be re-emitted by changing the start passed to
+build_intro - the cut points are the part worth keeping, not the files.
 
 Two details matter and are easy to get wrong:
 
@@ -22,8 +24,15 @@ Two details matter and are easy to get wrong:
   arbitrary; that one gets a curve that is equal-power *against pygame's linear
   fade-in*, since the body is started with Sound.play(fade_ms=...).
 
-Run from anywhere; rewrites the four Sounds/heatvision-*.ogg files in place.
+Run from anywhere; rewrites the Sounds/heatvision-*.ogg clips in place.
 Requires ffmpeg and numpy.
+
+The audio is reproducible but the files are not byte-reproducible: ffmpeg seeds
+the Ogg bitstream serial number randomly, so a rebuild leaves ~24 bytes changed
+and git reports every clip as modified. To tell a real change from that noise,
+compare decoded PCM rather than bytes:
+
+    ffmpeg -v error -i clip.ogg -f s16le -ac 2 -ar 48000 - | sha256sum
 """
 from __future__ import annotations
 
@@ -37,8 +46,8 @@ SR = 48000
 SOUNDS = Path(__file__).resolve().parent.parent / "Sounds"
 SRC = SOUNDS / "heatvision.ogg"
 
-CHARGE_START = 0.000    # quiet charge-up begins
-SWELL_START = 0.180     # ramp up to the blast begins
+CHARGE_START = 0.000    # quiet charge-up begins        } alternative intro
+SWELL_START = 0.180     # ramp up to the blast begins   } starts; see docstring
 PUNCH_START = 0.360     # the blast lands, at full volume - no ramp before it
 LOOP_START = 1.066      # see below; the intro runs to here
 LOOP_END = 2.056330     # chosen by correlation against LOOP_START
@@ -138,9 +147,7 @@ def build_tail(x: np.ndarray) -> None:
 def main() -> None:
     x = decode(SRC)
     print(f"{SRC.name}: {len(x)/SR:.3f}s")
-    build_intro(x, CHARGE_START, "heatvision-intro-full.ogg")
-    build_intro(x, SWELL_START, "heatvision-intro-swell.ogg")
-    build_intro(x, PUNCH_START, "heatvision-intro-punch.ogg", fade_in=PUNCH_FADE_IN)
+    build_intro(x, PUNCH_START, "heatvision-intro.ogg", fade_in=PUNCH_FADE_IN)
     build_loop(x, LOOP_START, LOOP_END, "heatvision-loop.ogg")
     build_loop(x, LOOP_END, CONTACT_END, "heatvision-contact.ogg")
     build_tail(x)

@@ -21,6 +21,9 @@ periodic over its own length. The crackle impulses and the slow wobble are
 wrapped/whole-cycle for the same reason. There is no seam to hide.
 
 Run from anywhere; rewrites Sounds/heatvision-sizzle.ogg. Requires ffmpeg+numpy.
+
+SEED is fixed so the audio is reproducible, but the file is not byte-reproducible
+- see the note in build_heatvision_clips.py about ffmpeg's random Ogg serial.
 """
 from __future__ import annotations
 
