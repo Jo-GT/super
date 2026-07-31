@@ -31,6 +31,23 @@ def load_game_sprite(rel_path, size):
         return None
 
 
+def load_sprite_sheet(rel_path, frame_count, frame_size):
+    """Load a horizontal strip sheet from anywhere under sprites/, split into
+    frame_count equal-width frames, each scaled to a common frame_size (w, h)."""
+    try:
+        path = os.path.join(_GAME_SPRITES_DIR, *rel_path.split("/"))
+        sheet = pygame.image.load(path).convert_alpha()
+        sw, sh = sheet.get_size()
+        fw = sw // frame_count
+        frames = []
+        for i in range(frame_count):
+            frame = sheet.subsurface((i * fw, 0, fw, sh))
+            frames.append(pygame.transform.smoothscale(frame, frame_size))
+        return frames
+    except Exception:
+        return []
+
+
 _KRYPTO_SPRITES_DIR = os.path.join(_GAME_SPRITES_DIR, "Krypto")
 _KRYPTO_SCALE = 0.34  # single physical scale applied to both sheets so the bite
                       # pose's taller lunge reads as the same dog, just airborne
@@ -474,23 +491,140 @@ class Enemy:
 
 
 class Thug(Enemy):
-    HP = 35; SPEED = 1.8; DMG = 0.0; COLOR = (80, 80, 80); RADIUS = 14
+    """Gun-toting street criminal: closes in to shooting range, then holds
+    position alternating idle/shoot until its clip is spent, reloads, repeats."""
+    HP = 35; SPEED = 1.8; DMG = 4.0; COLOR = (80, 80, 80); RADIUS = 14
+
+    STOP_RANGE    = 260   # stands and shoots once this close instead of closing in
+    SHOT_SPEED    = 5.5
+    SHOT_INTERVAL = 2.2
+    MAG_SIZE      = 3
+    RELOAD_TIME   = 1.7   # matches the 17-frame reload animation at RELOAD_FPS
+
+    IDLE_FPS   = 8
+    WALK_FPS   = 12
+    SHOT_FPS   = 12
+    RELOAD_FPS = 10
+
+    _FRAME_SIZE = (96, 96)
+    _idle_frames = None
+    _walk_frames = None
+    _shot_frames = None
+    _reload_frames = None
+    _loaded = False
+
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        if not Thug._loaded:
+            Thug._idle_frames   = load_sprite_sheet("Generic Criminal Goons/Idle_2.png", 11, self._FRAME_SIZE)
+            Thug._walk_frames   = load_sprite_sheet("Generic Criminal Goons/Walk.png", 10, self._FRAME_SIZE)
+            Thug._shot_frames   = load_sprite_sheet("Generic Criminal Goons/Shot.png", 4, self._FRAME_SIZE)
+            Thug._reload_frames = load_sprite_sheet("Generic Criminal Goons/reload.png", 17, self._FRAME_SIZE)
+            Thug._loaded = True
+        self.projectiles: list[Projectile] = []
+        self.shot_cd = random.uniform(0, self.SHOT_INTERVAL)
+        self.shots_fired = 0
+        self.reload_t = 0.0
+        self.face_right = False
+        self._anim_state = 'idle'
+        self._anim_t = 0.0
+        self._frame = 0
+
+    def _frames_for(self, state):
+        return {'idle': self._idle_frames, 'walk': self._walk_frames,
+                'shot': self._shot_frames, 'reload': self._reload_frames}[state]
+
+    def _set_anim(self, state):
+        self._anim_state = state
+        self._frame = 0
+        self._anim_t = 0.0
+
+    def _tick_anim(self, dt, fps, loop=True):
+        frames = self._frames_for(self._anim_state)
+        if not frames:
+            return
+        step = 1.0 / fps
+        self._anim_t += dt
+        while self._anim_t >= step:
+            self._anim_t -= step
+            if self._frame + 1 < len(frames):
+                self._frame += 1
+            elif loop:
+                self._frame = 0
+            # else: hold on the last frame
 
     def update(self, dt, superman, particles):
         self._base_update(dt)
-        self._move_toward(superman.x, superman.y, dt)
-        self.try_attack(superman, dt)
+        dx, dy = superman.x - self.x, superman.y - self.y
+        d = math.hypot(dx, dy)
+        self._angle = math.atan2(dy, dx)
+        if dx:
+            self.face_right = dx > 0
+        self.shot_cd = max(0.0, self.shot_cd - dt)
+
+        if self.reload_t > 0:
+            if self._anim_state != 'reload':
+                self._set_anim('reload')
+            self.reload_t = max(0.0, self.reload_t - dt)
+            self._tick_anim(dt, self.RELOAD_FPS, loop=False)
+            if self.reload_t <= 0:
+                self.shots_fired = 0
+        elif d > self.STOP_RANGE:
+            if self._anim_state != 'walk':
+                self._set_anim('walk')
+            self._move_toward(superman.x, superman.y, dt)
+            self._tick_anim(dt, self.WALK_FPS, loop=True)
+        elif self.shot_cd <= 0:
+            self.shot_cd = self.SHOT_INTERVAL
+            self.shots_fired += 1
+            self._set_anim('shot')
+            self.projectiles.append(
+                Projectile(self.x, self.y, self._angle, self.SHOT_SPEED, (255, 210, 120), 6, 1.6))
+            particles.burst(self.x + math.cos(self._angle) * 22, self.y + math.sin(self._angle) * 22,
+                             (255, 200, 80), 4, 2)
+            if self.shots_fired >= self.MAG_SIZE:
+                self.reload_t = self.RELOAD_TIME
+            self._tick_anim(dt, self.SHOT_FPS, loop=False)
+        else:
+            if self._anim_state not in ('idle', 'shot'):
+                self._set_anim('idle')
+            fps = self.SHOT_FPS if self._anim_state == 'shot' else self.IDLE_FPS
+            self._tick_anim(dt, fps, loop=(self._anim_state != 'shot'))
+
+        for proj in self.projectiles:
+            proj.update(dt)
+            if proj.hits_superman(superman):
+                superman.take_damage(self.DMG)
+                particles.burst(superman.x, superman.y, (255, 210, 120), 5, 2)
+                proj.dead = True
+        self.projectiles = [p for p in self.projectiles if not p.dead]
 
     def draw(self, surface, cam):
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
-        self._draw_base(surface, cam, (80, 80, 80))
-        # Weapon stick
-        ex = sx + int(math.cos(self._angle) * 18)
-        ey = sy + int(math.sin(self._angle) * 18)
-        c = WHITE if self._hit_flash > 0 else BROWN
-        pygame.draw.line(surface, c, (sx, sy), (ex, ey), 3)
-        pygame.draw.circle(surface, (60, 60, 60), (sx, sy), 6)
+        frames = self._frames_for(self._anim_state)
+        sprite = frames[self._frame % len(frames)] if frames else None
+        if sprite is not None:
+            img = sprite
+            if self._hit_flash > 0:
+                img = sprite.copy(); img.fill((180, 180, 180, 0), special_flags=pygame.BLEND_RGB_ADD)
+            elif self.frozen > 0:
+                img = sprite.copy(); img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
+            # Sheet's native pose faces left; flip when facing right.
+            draw_img = pygame.transform.flip(img, True, False) if self.face_right else img
+            rect = draw_img.get_rect(midbottom=(sx, sy + self.RADIUS))
+            surface.blit(draw_img, rect)
+            draw_health_bar(surface, sx, rect.top - 8, self.hp, self.max_hp, self.RADIUS * 2)
+        else:
+            self._draw_base(surface, cam, (80, 80, 80))
+            # Weapon stick
+            ex = sx + int(math.cos(self._angle) * 18)
+            ey = sy + int(math.sin(self._angle) * 18)
+            c = WHITE if self._hit_flash > 0 else BROWN
+            pygame.draw.line(surface, c, (sx, sy), (ex, ey), 3)
+            pygame.draw.circle(surface, (60, 60, 60), (sx, sy), 6)
+        for proj in self.projectiles:
+            proj.draw(surface, cam)
 
 
 class LexGoon(Thug):
@@ -521,6 +655,8 @@ class LexGoon(Thug):
         rect = img.get_rect(center=(sx, sy))
         surface.blit(img, rect)
         draw_health_bar(surface, sx, rect.top - 8, self.hp, self.max_hp, self.RADIUS * 2)
+        for proj in self.projectiles:
+            proj.draw(surface, cam)
 
 
 class Robot(Enemy):
@@ -856,15 +992,55 @@ class Projectile:
 # ─── CIVILIAN / ANIMAL ───────────────────────────────────────────────────────
 
 class Civilian:
+    HOSTAGE_RUN_SPEED = 2.6
+    HOSTAGE_ANIM_FPS  = 10
+
+    _hostage_idle = None
+    _hostage_run_frames = None
+    _hostage_loaded = False
+
     def __init__(self, x, y, hostage=False):
         self.x, self.y = float(x), float(y)
         self.saved = False
         self.hostage = hostage
+        # self.hostage flips to False once freed (enemies defeated); this stays
+        # True forever so the sprite branch still applies during the fleeing run.
+        self.was_hostage = hostage
         self._t = 0.0
+        self._anim_t = 0.0
+        self._frame = 0
+        self.face_right = True
+
+        if hostage and not Civilian._hostage_loaded:
+            Civilian._hostage_idle = load_game_sprite("Citizens/Hostage/hostage.png", (59, 52))
+            Civilian._hostage_run_frames = load_sprite_sheet("Citizens/Hostage/hostage run.png", 10, (88, 88))
+            Civilian._hostage_loaded = True
 
     def update(self, dt, superman):
         self._t += dt
-        if not self.saved:
+        if self.saved:
+            return
+
+        if self.was_hostage and not self.hostage:
+            # Freed: run to Superman instead of just standing around waiting.
+            dx, dy = superman.x - self.x, superman.y - self.y
+            d = math.hypot(dx, dy)
+            if dx:
+                self.face_right = dx > 0
+            frames = Civilian._hostage_run_frames
+            if frames:
+                step = 1.0 / self.HOSTAGE_ANIM_FPS
+                self._anim_t += dt
+                while self._anim_t >= step:
+                    self._anim_t -= step
+                    self._frame = (self._frame + 1) % len(frames)
+            if d < 30:
+                self.saved = True
+            elif d > 1:
+                spd = min(self.HOSTAGE_RUN_SPEED, d)
+                self.x += dx / d * spd
+                self.y += dy / d * spd
+        else:
             d = math.hypot(superman.x - self.x, superman.y - self.y)
             if d < 30:
                 self.saved = True
@@ -874,6 +1050,20 @@ class Civilian:
             return
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
+
+        if self.was_hostage:
+            if self.hostage:
+                img = Civilian._hostage_idle
+            else:
+                frames = Civilian._hostage_run_frames
+                sprite = frames[self._frame % len(frames)] if frames else None
+                # Sheet's native pose faces right; flip only when running left.
+                img = pygame.transform.flip(sprite, True, False) if (sprite and not self.face_right) else sprite
+            if img is not None:
+                rect = img.get_rect(midbottom=(sx, sy + 16))
+                surface.blit(img, rect)
+                return
+
         bob = int(2 * math.sin(self._t * 4))
         c = MAROON if self.hostage else (220, 180, 130)
         pygame.draw.circle(surface, c, (sx, sy + bob), 8)
