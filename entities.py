@@ -421,31 +421,37 @@ class Superman:
         else:
             base = self._sprite_hover
 
-        # Head position in world space: rotate the pose's local head offset by facing,
-        # mirroring the same flip-then-rotate the sprite itself goes through below so
-        # effects (heat vision) track the actual rendered head, not the body center.
-        hdx, hdy = self.HEAD_OFFSET_HOVER if base is self._sprite_hover else self.HEAD_OFFSET_FLY
-        c, s = math.cos(self.facing), math.sin(self.facing)
-        hpx = hdx * c - hdy * s
-        hpy = hdx * s + hdy * c
-        if c < 0:
-            hpy = -hpy
+        # The hover pose is a tall standing figure, so it only ever mirrors -- tilting it
+        # would lay him on his side. Flying and death poses rotate to point at the cursor.
+        upright = base is self._sprite_hover
+        flip_x = math.cos(self.facing) < 0
+
+        # Head position in world space, put through the same flip/rotate the sprite gets
+        # below so effects (heat vision) track the actual rendered head, not the body center.
+        hdx, hdy = self.HEAD_OFFSET_HOVER if upright else self.HEAD_OFFSET_FLY
+        if upright:
+            hpx, hpy = (-hdx if flip_x else hdx), hdy
+        else:
+            # Mirroring across x and then rotating by (180 - facing) comes out the same as
+            # negating the local y offset and rotating by facing.
+            if flip_x:
+                hdy = -hdy
+            c, s = math.cos(self.facing), math.sin(self.facing)
+            hpx = hdx * c - hdy * s
+            hpy = hdx * s + hdy * c
         self.head_pos = (self.x + hpx, self.y + hpy)
 
         if base is not None:
-            # Flip horizontally when facing left, then rotate to match facing direction.
-            # Sprites face right by default (angle 0). Rotation uses screen-space convention
-            # where y increases downward, so clockwise = negative pygame angle.
-            flip_x = math.cos(self.facing) < 0
-            if flip_x:
-                draw_sprite = pygame.transform.flip(base, True, False)
-                # Mirror the angle across the y-axis so the flipped sprite tracks correctly
-                angle_deg = math.degrees(self.facing - math.copysign(math.pi, self.facing))
+            # Sprites face right at angle 0, so mirror horizontally when the cursor is on
+            # his left. pygame rotates counter-clockwise while facing is in y-down screen
+            # space, hence the negation; and a mirrored sprite starts out pointing left
+            # (180), so it needs 180 - facing to end up along facing.
+            draw_sprite = pygame.transform.flip(base, True, False) if flip_x else base
+            if upright:
+                rotated = draw_sprite
             else:
-                draw_sprite = base
-                angle_deg = -math.degrees(self.facing)
-
-            rotated = pygame.transform.rotate(draw_sprite, angle_deg)
+                angle_deg = (180.0 - math.degrees(self.facing)) if flip_x else -math.degrees(self.facing)
+                rotated = pygame.transform.rotate(draw_sprite, angle_deg)
             rect = rotated.get_rect(center=(sx, sy))
 
             # Tint overlays (hit flash → white; kryptonite → green)
