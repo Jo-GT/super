@@ -297,13 +297,14 @@ class Superman:
     def can_use_heat_vision(self):
         return self.heat_cd <= 0
 
-    def heat_beam_angle(self):
-        """Direction from the head to the cursor.
+    def aim_angle(self):
+        """Direction from the head to the cursor, for anything fired from it.
 
         Deliberately not self.facing: that is measured from the body centre and
-        drives the sprite. The beam leaves the head, so aiming it along facing
-        sent it parallel to the body-to-cursor line but offset from it by the
-        head offset, and it visibly missed what you were pointing at.
+        drives the sprite. Heat vision and freeze breath both leave the head, so
+        aiming them along facing sent them parallel to the body-to-cursor line
+        but offset from it by the head offset, and they visibly missed what you
+        were pointing at.
         """
         if self.aim_world is None:
             return self.facing
@@ -315,7 +316,7 @@ class Superman:
 
     def heat_beam_target(self):
         """Far end of the beam: out from the head, through the cursor, to range."""
-        a = self.heat_beam_angle()
+        a = self.aim_angle()
         hx, hy = self.head_pos
         return (hx + math.cos(a) * self.HEAT_RANGE,
                 hy + math.sin(a) * self.HEAT_RANGE)
@@ -346,14 +347,15 @@ class Superman:
             return False
         self.freeze_cd = self.FREEZE_CD
         hx, hy = self.head_pos
-        particles.frost_breath(hx, hy, self.facing, self.FREEZE_RANGE)
+        aim = self.aim_angle()
+        particles.frost_breath(hx, hy, aim, self.FREEZE_RANGE)
         for e in enemies:
             dx = e.x - hx
             dy = e.y - hy
             d = math.hypot(dx, dy)
             if d < self.FREEZE_RANGE:
                 a = math.atan2(dy, dx)
-                diff = abs((a - self.facing + math.pi) % (2 * math.pi) - math.pi)
+                diff = abs((a - aim + math.pi) % (2 * math.pi) - math.pi)
                 if diff < 0.75:
                     e.freeze(self.FREEZE_LOCK)
         return True
@@ -430,7 +432,7 @@ class Superman:
         if d > self.FREEZE_RANGE:
             return False
         a = math.atan2(dy, dx)
-        diff = abs((a - self.facing + math.pi) % (2 * math.pi) - math.pi)
+        diff = abs((a - self.aim_angle() + math.pi) % (2 * math.pi) - math.pi)
         return diff < 0.75
 
     def draw(self, surface, cam):

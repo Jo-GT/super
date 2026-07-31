@@ -852,7 +852,7 @@ class Game:
         if self.superman.freeze_active:
             fx = int(self.superman.head_pos[0] - self.camera.x)
             fy = int(self.superman.head_pos[1] - self.camera.y)
-            angle = self.superman.facing
+            angle = self.superman.aim_angle()   # same angle the freeze test uses
             pts = [(fx, fy)]
             reach = Superman.FREEZE_RANGE
             for da in range(-45, 46, 5):
