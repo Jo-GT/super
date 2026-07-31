@@ -295,13 +295,28 @@ class Superman:
     def can_use_heat_vision(self):
         return self.heat_cd <= 0
 
+    def heat_beam_target(self):
+        """Far end of the beam, from the head along the current facing."""
+        hx, hy = self.head_pos
+        return (hx + math.cos(self.facing) * self.HEAT_RANGE,
+                hy + math.sin(self.facing) * self.HEAT_RANGE)
+
+    def heat_beam_hits(self, enemies):
+        """Whether the beam is touching anything right now.
+
+        Deliberately separate from try_heat_vision's damage pass, which is
+        rate-limited to HEAT_CD (12.5Hz). The contact sound wants a per-frame
+        answer or it lags the visual by up to 80ms.
+        """
+        tx, ty = self.heat_beam_target()
+        return any(self._in_beam(e.x, e.y, tx, ty, 28) for e in enemies)
+
     def try_heat_vision(self, enemies, particles):
         if self.heat_cd > 0:
             return
         self.heat_cd = self.HEAT_CD
         hx, hy = self.head_pos
-        tx = hx + math.cos(self.facing) * self.HEAT_RANGE
-        ty = hy + math.sin(self.facing) * self.HEAT_RANGE
+        tx, ty = self.heat_beam_target()
         particles.heat_beam(hx, hy, tx, ty)
         for e in enemies:
             if self._in_beam(e.x, e.y, tx, ty, 28):

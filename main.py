@@ -77,9 +77,21 @@ snd_gameover  = _load_sound("GameOver.ogg")
 # skips the ramp too and opens on the blast already at full volume.
 HEAT_INTRO_VARIANT = "punch"   # "full" | "swell" | "punch"
 
-snd_heat_intro = _load_sound(f"heatvision-intro-{HEAT_INTRO_VARIANT}.ogg")
-snd_heat_loop  = _load_sound("heatvision-loop.ogg")
-snd_heat_tail  = _load_sound("heatvision-tail.ogg")
+snd_heat_intro  = _load_sound(f"heatvision-intro-{HEAT_INTRO_VARIANT}.ogg")
+snd_heat_loop   = _load_sound("heatvision-loop.ogg")
+snd_heat_tail   = _load_sound("heatvision-tail.ogg")
+snd_heat_sizzle = _load_sound("heatvision-sizzle.ogg")
+
+# The sizzle layers on top of the body loop while the beam is burning something,
+# rather than replacing it. Swapping the body out would mean crossfading between
+# two slices of the same tonal clip at an arbitrary moment, which comb-filters
+# badly (up to 4.5dB swings depending where the switch lands); the sizzle is
+# uncorrelated noise, so it just adds.
+#
+# Contact is held briefly after the last hit. Without that, sweeping the beam
+# across enemies flickers the layer on and off several times a second.
+HEAT_CONTACT_HOLD = 0.20    # seconds to keep the sizzle up after the last hit
+HEAT_SIZZLE_FADE = 60       # ms, in and out
 
 # The intro clips run on into the blast and fade out over their final
 # HEAT_LOOP_LEAD_IN seconds, so the looping body is faded in underneath them
@@ -510,6 +522,8 @@ class Game:
         self._wind_playing = False
         self._heat_phase = None   # None | 'intro' | 'loop'
         self._heat_t = 0.0        # seconds into the intro clip
+        self._heat_contact_t = 0.0  # time left on the contact hold
+        self._sizzle_playing = False
         self._freeze_playing = False
         self._shift_prev = False
         self._xray_prev = False
@@ -562,7 +576,8 @@ class Game:
         s.heat_firing = bool(keys[pygame.K_SPACE] or mouse_buttons[0])
         if s.heat_firing and s.heat_cd <= 0:
             s.try_heat_vision(all_enemies, self.pfs)
-        self._update_heat_audio(s.heat_firing, dt)
+        self._update_heat_audio(
+            s.heat_firing, s.heat_firing and s.heat_beam_hits(all_enemies), dt)
 
         # Freeze Breath: F or RMB (held for a continuous frost cone)
         s.freeze_active = bool(keys[pygame.K_f] or mouse_buttons[2])
@@ -617,8 +632,8 @@ class Game:
 
         s.update(dt, keys, mouse_world)
 
-    def _update_heat_audio(self, firing, dt):
-        """Drive the three-part beam sound: intro, looping body, tail-off.
+    def _update_heat_audio(self, firing, contact, dt):
+        """Drive the beam sound: intro, looping body, tail-off, sizzle layer.
 
         The trigger is a level read, so this tracks how far through that
         sequence we are rather than a single is-it-playing flag.
@@ -633,6 +648,8 @@ class Game:
                 self._stop_heat_audio(tail=self._heat_phase == 'loop')
             return
 
+        self._update_heat_sizzle(contact, dt)
+
         if self._heat_phase is None:
             if snd_heat_intro:
                 snd_heat_intro.play()
@@ -646,6 +663,23 @@ class Game:
             if self._heat_t >= snd_heat_intro.get_length() - HEAT_LOOP_LEAD_IN:
                 snd_heat_loop.play(loops=-1, fade_ms=int(HEAT_LOOP_LEAD_IN * 1000))
                 self._heat_phase = 'loop'
+
+    def _update_heat_sizzle(self, contact, dt):
+        """Fade the burning-something layer in and out under the beam."""
+        if snd_heat_sizzle is None:
+            return
+        if contact:
+            self._heat_contact_t = HEAT_CONTACT_HOLD
+        else:
+            self._heat_contact_t = max(0.0, self._heat_contact_t - dt)
+
+        want = self._heat_contact_t > 0
+        if want and not self._sizzle_playing:
+            snd_heat_sizzle.play(loops=-1, fade_ms=HEAT_SIZZLE_FADE)
+            self._sizzle_playing = True
+        elif not want and self._sizzle_playing:
+            snd_heat_sizzle.fadeout(HEAT_SIZZLE_FADE)
+            self._sizzle_playing = False
 
     def _stop_heat_audio(self, tail=False):
         """Release the beam. With tail=True it fades into the tail-off clip;
@@ -664,8 +698,15 @@ class Game:
                 snd_heat_tail.play()
             else:
                 snd_heat_tail.stop()
+        if snd_heat_sizzle:
+            if tail:
+                snd_heat_sizzle.fadeout(HEAT_SIZZLE_FADE)
+            else:
+                snd_heat_sizzle.stop()
         self._heat_phase = None
         self._heat_t = 0.0
+        self._heat_contact_t = 0.0
+        self._sizzle_playing = False
 
     def stop_sounds(self):
         if snd_wind:
