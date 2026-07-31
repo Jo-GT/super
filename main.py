@@ -145,7 +145,7 @@ def draw_bar(surf, x, y, w, h, ratio, full_col, empty_col=(60, 0, 0), label=None
         draw_text(surf, label, font_tiny, WHITE, x + w + 4, y, shadow=False)
 
 
-def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label):
+def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label, cd_secs=None):
     bg = pygame.Surface((size, size), pygame.SRCALPHA)
     bg.fill((0, 0, 0, 140))
     surf.blit(bg, (x, y))
@@ -223,38 +223,38 @@ class HUD:
         # ── Power icons ───────────────────────────────────────────────────────
         icon_y = SCREEN_H - 72
         icon_sz = 56
+        # One row per power: (label, colour, cooldown 0..1, seconds remaining,
+        # key, duration 0..1 or None). Everything a power needs lives on its own
+        # line, so adding one is a single entry and an icon can't drift out of
+        # step with its own bar -- they used to be separate calls that repeated
+        # the label and colour, and a hardcoded bar index went stale the moment
+        # a power was inserted ahead of it. Cooldown ratio and seconds are both
+        # carried because they genuinely differ: Krypto reads fully dimmed while
+        # he's deployed, yet has no cooldown pending.
         powers = [
-            ("HEAT\nVISN", FIRE_HOT,   superman.heat_cd,  superman.HEAT_CD,  "SPACE"),
-            ("FRZE\nBRTH", ICE,         superman.freeze_cd, superman.FREEZE_CD, "F"),
-            ("SPNCH",       YELLOW_S,   superman.punch_cd, superman.PUNCH_CD, "Q"),
-            ("SPDS",        CYAN,        superman.speed_cd, superman.SPEED_CD, "SHIFT"),
-            ("XRAY",        XRAY_C,      superman.xray_cd,  superman.XRAY_CD,  "X"),
+            ("HEAT\nVISN", FIRE_HOT, superman.heat_cd / superman.HEAT_CD,     superman.heat_cd,   "SPACE", None),
+            ("FRZE\nBRTH", ICE,      superman.freeze_cd / superman.FREEZE_CD, superman.freeze_cd, "F",     None),
+            ("SPNCH",      YELLOW_S, superman.punch_cd / superman.PUNCH_CD,   superman.punch_cd,  "Q",     None),
+            ("SPDS",       CYAN,     superman.speed_cd / superman.SPEED_CD,   superman.speed_cd,  "SHIFT",
+             superman.speed_remaining / superman.SPEED_DUR if superman.speed_remaining > 0 else None),
+            ("XRAY",       XRAY_C,   superman.xray_cd / superman.XRAY_CD,     superman.xray_cd,   "X",
+             superman.xray_remaining / superman.XRAY_DUR if superman.xray_remaining > 0 else None),
         ]
+        # Defensive: the game always builds a Krypto, but the HUD should degrade
+        # to a missing icon rather than crash if that ever stops being true.
         if krypto is not None:
-            powers.append(("KRYPTO", SILVER, krypto.cd_ratio * krypto.CALL_CD, krypto.CALL_CD, "C"))
+            powers.append(("KRYPTO", SILVER, krypto.cd_ratio, krypto.call_cd, "C",
+                           krypto.timer / krypto.ACTIVE_DUR if krypto.state == 'active' else None))
+
         total_w = len(powers) * (icon_sz + 8) - 8
         start_x = SCREEN_W // 2 - total_w // 2
-        for i, (label, col, cd, max_cd, key) in enumerate(powers):
+        for i, (label, col, cd_ratio, cd_secs, key, dur) in enumerate(powers):
             ix = start_x + i * (icon_sz + 8)
-            ratio = cd / max_cd if max_cd > 0 else 0
-            cooldown_icon(surface, ix, icon_y, icon_sz, col, label, ratio, key)
-
-        # Duration bars, for the powers that run for a period rather than firing
-        # instantly. Position is derived from the row instead of hardcoded, so
-        # adding or reordering a power can't leave a bar under the wrong icon --
-        # which is exactly what happened to the index 4 here once XRAY took that
-        # slot and pushed KRYPTO along. .index() raises if a label is renamed,
-        # rather than silently drawing no bar at all.
-        def duration_bar(label, pct, col):
-            bx = start_x + [p[0] for p in powers].index(label) * (icon_sz + 8)
-            pygame.draw.rect(surface, col, (bx, icon_y + icon_sz - 6, int(icon_sz * pct), 4))
-
-        if superman.speed_remaining > 0:
-            duration_bar("SPDS", superman.speed_remaining / superman.SPEED_DUR, CYAN)
-        if superman.xray_remaining > 0:
-            duration_bar("XRAY", superman.xray_remaining / superman.XRAY_DUR, XRAY_C)
-        if krypto is not None and krypto.state == 'active':
-            duration_bar("KRYPTO", krypto.timer / krypto.ACTIVE_DUR, SILVER)
+            cooldown_icon(surface, ix, icon_y, icon_sz, col, label, cd_ratio, key, cd_secs)
+            if dur is not None:
+                # After its own icon, so the bar lies over the dim overlay --
+                # the same order the separate bar pass produced.
+                pygame.draw.rect(surface, col, (ix, icon_y + icon_sz - 6, int(icon_sz * dur), 4))
 
         # ── Active event banner ───────────────────────────────────────────────
         if active_event:
