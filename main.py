@@ -155,8 +155,14 @@ def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label, cd_secs=N
         overlay = pygame.Surface((size, size), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, int(180 * cd_ratio)))
         surf.blit(overlay, (x, y))
-        draw_text(surf, f"{cd_ratio:.1f}s" if cd_ratio > 0.5 else "", font_tiny, WHITE,
-                  x + size // 2, y + size // 2 + 6, center=True, shadow=False)
+        # Real seconds left, not the 0..1 ratio this used to print with an "s"
+        # stuck on the end -- that read "0.5s" with nine seconds still to go.
+        # Sub-second cooldowns (heat 0.08s, freeze 0.12s) are skipped; a number
+        # that small only flickers.
+        if cd_secs is not None and cd_secs >= 0.5:
+            secs = f"{cd_secs:.0f}s" if cd_secs >= 10 else f"{cd_secs:.1f}s"
+            draw_text(surf, secs, font_tiny, WHITE,
+                      x + size // 2, y + size // 2 + 6, center=True, shadow=False)
     draw_text(surf, key_label, font_tiny, LGRAY, x + 2, y + size - 14, shadow=False)
 
 
