@@ -8,6 +8,7 @@ Controls:
   F / RMB            - Freeze Breath
   Q                  - Super Punch (dash to nearest enemy)
   Shift              - Super Speed
+  C                  - Call Krypto (temporary ally)
 """
 
 import pygame
@@ -19,7 +20,7 @@ import os
 from constants import *
 from city import City
 from particles import ParticleSystem
-from entities import Superman
+from entities import Superman, Krypto
 from events import BaseEvent, spawn_random_event
 from dialogue import DialogueManager
 
@@ -186,7 +187,7 @@ class HUD:
         self._score_anim = 0
         self._last_score = 0
 
-    def draw(self, surface, superman, events, camera, active_event=None):
+    def draw(self, surface, superman, events, camera, active_event=None, krypto=None):
         # ── Health bar ───────────────────────────────────────────────────────
         hp_ratio = superman.hp / superman.MAX_HP
         hp_col = GREEN if hp_ratio > 0.5 else (GOLD if hp_ratio > 0.25 else RED)
@@ -226,6 +227,8 @@ class HUD:
             ("SPNCH",       YELLOW_S,   superman.punch_cd, superman.PUNCH_CD, "Q"),
             ("SPDS",        CYAN,        superman.speed_cd, superman.SPEED_CD, "SHIFT"),
         ]
+        if krypto is not None:
+            powers.append(("KRYPTO", SILVER, krypto.cd_ratio * krypto.CALL_CD, krypto.CALL_CD, "C"))
         total_w = len(powers) * (icon_sz + 8) - 8
         start_x = SCREEN_W // 2 - total_w // 2
         for i, (label, col, cd, max_cd, key) in enumerate(powers):
@@ -238,6 +241,12 @@ class HUD:
             pct = superman.speed_remaining / superman.SPEED_DUR
             ix = start_x + 3 * (icon_sz + 8)
             pygame.draw.rect(surface, CYAN, (ix, icon_y + icon_sz - 6, int(icon_sz * pct), 4))
+
+        # Krypto active-duration remaining
+        if krypto is not None and krypto.state == 'active':
+            pct = krypto.timer / krypto.ACTIVE_DUR
+            ix = start_x + 4 * (icon_sz + 8)
+            pygame.draw.rect(surface, SILVER, (ix, icon_y + icon_sz - 6, int(icon_sz * pct), 4))
 
         # ── Active event banner ───────────────────────────────────────────────
         if active_event:
@@ -428,6 +437,7 @@ class Game:
         self.pfs    = ParticleSystem()
         start_x, start_y = WORLD_W // 2, WORLD_H // 2
         self.superman = Superman(start_x, start_y)
+        self.krypto = Krypto()
         self.camera.x = start_x - SCREEN_W / 2
         self.camera.y = start_y - SCREEN_H / 2
         self.events: list[BaseEvent] = []
@@ -441,6 +451,7 @@ class Game:
         self._heat_playing = False
         self._freeze_playing = False
         self._shift_prev = False
+        self._c_prev = False
 
         # Mouse buttons are read as a level, not an edge, so the click that
         # started the game is still physically down for the first few frames
@@ -528,6 +539,15 @@ class Game:
                     snd_sprint.play()
         self._shift_prev = shift_down
 
+        # Call Krypto: C (edge-triggered so a held key doesn't spam the notice)
+        c_down = bool(keys[pygame.K_c])
+        if c_down and not self._c_prev:
+            if self.krypto.can_call():
+                self.krypto.call()
+            else:
+                self.notify("Krypto is not listening to you right now", SILVER)
+        self._c_prev = c_down
+
         s.update(dt, keys, mouse_world)
 
     def stop_sounds(self):
@@ -594,6 +614,13 @@ class Game:
         # Remove finished events
         self.events = [e for e in self.events if not (e.complete or e.failed)]
 
+        # Krypto companion
+        all_enemies = []
+        for ev in self.events:
+            if hasattr(ev, 'enemies'):
+                all_enemies.extend(ev.enemies)
+        self.krypto.update(dt, s, all_enemies, self.pfs)
+
         # Spawn new events
         self._spawn_cd -= dt
         if self._spawn_cd <= 0:
@@ -627,6 +654,7 @@ class Game:
 
         # Superman
         self.superman.draw(screen, self.camera)
+        self.krypto.draw(screen, self.camera)
 
         # Heat vision beam (always exits the head, wherever the current pose puts it)
         if self.superman.heat_firing:
@@ -664,7 +692,7 @@ class Game:
         self.flash.draw(screen)
 
         # HUD
-        self.hud.draw(screen, self.superman, self.events, self.camera, self._active_event)
+        self.hud.draw(screen, self.superman, self.events, self.camera, self._active_event, self.krypto)
 
         # Lex/Superman dialogue popups
         self.dialogue.draw(screen)
@@ -746,17 +774,19 @@ def draw_menu():
         draw_text(screen, "Guardian of Metropolis", font_large, BLUE_S, SCREEN_W // 2, 200, center=True)
 
         # Controls box
-        bx2, by2 = SCREEN_W // 2 - 300, 265
-        bg = pygame.Surface((600, 240), pygame.SRCALPHA)
+        bx2, by2 = SCREEN_W // 2 - 300, 250
+        box_h = 280
+        bg = pygame.Surface((600, box_h), pygame.SRCALPHA)
         bg.fill((0, 0, 0, 160))
         screen.blit(bg, (bx2, by2))
-        pygame.draw.rect(screen, BLUE_S, (bx2, by2, 600, 240), 2)
+        pygame.draw.rect(screen, BLUE_S, (bx2, by2, 600, box_h), 2)
         controls = [
             ("WASD / Arrows", "Fly"),
             ("Space / Left Click", "Heat Vision (hold)"),
             ("F / Right Click", "Freeze Breath"),
             ("Q", "Super Punch (dash to enemy)"),
             ("Shift", "Super Speed"),
+            ("C", "Call Krypto (temporary ally)"),
             ("Mouse", "Aim direction"),
         ]
         for i, (key, desc) in enumerate(controls):
@@ -765,8 +795,8 @@ def draw_menu():
             draw_text(screen, desc, font_small, WHITE, bx2 + 220, y)
 
         # Start prompt
-        draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 540, center=True)
-        draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 590, center=True)
+        draw_text(screen, "Press ENTER to begin", font_large, (*GOLD[:3], alpha), SCREEN_W // 2, 555, center=True)
+        draw_text(screen, "ESC to quit", font_small, LGRAY, SCREEN_W // 2, 605, center=True)
 
     pygame.display.flip()
 

@@ -2,7 +2,7 @@ from enum import Enum, auto
 
 SCREEN_W, SCREEN_H = 1280, 720
 FPS    = 60
-TITLE  = "Superman: Guardian of Metropolis."
+TITLE  = "Superman: Guardian of Metropolis"
 WORLD_W = 4608
 WORLD_H = 4608
 

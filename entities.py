@@ -31,6 +31,34 @@ def load_game_sprite(rel_path, size):
         return None
 
 
+_KRYPTO_SPRITES_DIR = os.path.join(_GAME_SPRITES_DIR, "Krypto")
+_KRYPTO_SCALE = 0.34  # single physical scale applied to both sheets so the bite
+                      # pose's taller lunge reads as the same dog, just airborne
+
+
+def _load_krypto_frames(filename, frame_count):
+    try:
+        path = os.path.join(_KRYPTO_SPRITES_DIR, filename)
+        sheet = pygame.image.load(path).convert_alpha()
+        sw, sh = sheet.get_size()
+        fw = sw // frame_count
+        tw, th = max(1, round(fw * _KRYPTO_SCALE)), max(1, round(sh * _KRYPTO_SCALE))
+        frames = []
+        for i in range(frame_count):
+            frame = sheet.subsurface((i * fw, 0, fw, sh))
+            frames.append(pygame.transform.smoothscale(frame, (tw, th)))
+        return frames
+    except Exception:
+        return []
+
+
+def _load_krypto_sound(filename):
+    try:
+        return pygame.mixer.Sound(os.path.join(_KRYPTO_SPRITES_DIR, filename))
+    except Exception:
+        return None
+
+
 _ANIMAL_SPRITE_FILES = {
     'cat': ["black cat.png", "brown cat.png", "white cat.png"],
     'dog': ["black dog.png", "brown dog.png", "white dog.png"],
@@ -912,3 +940,182 @@ class Animal:
         gs = pygame.Surface((30, 30), pygame.SRCALPHA)
         pygame.draw.circle(gs, (*GREEN, int(100 + 80 * math.sin(self._t * 4))), (15, 15), 12, 2)
         surface.blit(gs, (sx - 15, sy - 28 + bob))
+
+
+# ─── KRYPTO (temporary ally) ─────────────────────────────────────────────────
+
+class Krypto:
+    """Superman's dog: whistled in, flies in fast, barks on arrival, then
+    auto-attacks whatever's fighting Superman until his time runs out.
+
+    States: idle -> calling (whistle playing) -> incoming (flying to Superman)
+    -> active (fighting/orbiting) -> back to idle with the cooldown running.
+    """
+
+    CALL_CD       = 35.0
+    ACTIVE_DUR    = 15.0
+    SPAWN_DIST    = 480
+    ARRIVE_SPEED  = 22
+    CHASE_SPEED   = 10
+    ORBIT_SPEED   = 1.4
+    ORBIT_RADIUS  = 55
+    LEASH_RANGE   = 380   # only engages enemies within this of Superman
+    TELEPORT_DIST = 900   # snapped back to Superman's side if left this far behind
+    ATTACK_RANGE  = 46
+    ATTACK_CD     = 0.9
+    ATTACK_DMG    = 14
+    ANIM_FPS      = 10
+
+    _run_frames = None
+    _bite_frames = None
+    _snd_whistle = None
+    _snd_bark = None
+    _loaded = False
+
+    def __init__(self):
+        if not Krypto._loaded:
+            Krypto._run_frames  = _load_krypto_frames("krypto running sprite sheet.png", 5)
+            Krypto._bite_frames = _load_krypto_frames("krypto bite sprite sheet.png", 5)
+            Krypto._snd_whistle = _load_krypto_sound("krypto whistle.mp3")
+            Krypto._snd_bark    = _load_krypto_sound("krypto bark.mp3")
+            Krypto._loaded = True
+
+        self.state = 'idle'  # idle | calling | incoming | active
+        self.call_cd = 0.0
+        self.timer = 0.0
+        self.x = self.y = 0.0
+        self.face_right = False
+        self._orbit_angle = random.uniform(0, math.pi * 2)
+        self._current_anim = 'run'
+        self._anim_t = 0.0
+        self._frame = 0
+        self.attack_cd = 0.0
+
+    @property
+    def cd_ratio(self):
+        """0 (ready) .. 1 (on cooldown or currently deployed) for the HUD icon."""
+        if self.state != 'idle':
+            return 1.0
+        return self.call_cd / self.CALL_CD if self.CALL_CD else 0.0
+
+    def can_call(self):
+        return self.state == 'idle' and self.call_cd <= 0
+
+    def call(self):
+        if not self.can_call():
+            return False
+        self.state = 'calling'
+        self.timer = self._snd_whistle.get_length() if self._snd_whistle else 1.2
+        if self._snd_whistle:
+            self._snd_whistle.play()
+        return True
+
+    def _animate(self, dt, name):
+        if name != self._current_anim:
+            self._current_anim = name
+            self._frame = 0
+            self._anim_t = 0.0
+        frames = self._run_frames if name == 'run' else self._bite_frames
+        if not frames:
+            return
+        self._anim_t += dt
+        step = 1.0 / self.ANIM_FPS
+        while self._anim_t >= step:
+            self._anim_t -= step
+            self._frame = (self._frame + 1) % len(frames)
+
+    def update(self, dt, superman, enemies, particles):
+        if self.state == 'idle':
+            self.call_cd = max(0.0, self.call_cd - dt)
+            return
+
+        if self.state == 'calling':
+            self.timer -= dt
+            if self.timer <= 0:
+                angle = random.uniform(0, math.pi * 2)
+                self.x = superman.x + math.cos(angle) * self.SPAWN_DIST
+                self.y = superman.y + math.sin(angle) * self.SPAWN_DIST
+                self.state = 'incoming'
+            return
+
+        if self.state == 'incoming':
+            dx, dy = superman.x - self.x, superman.y - self.y
+            d = math.hypot(dx, dy)
+            if dx:
+                self.face_right = dx > 0
+            self._animate(dt, 'run')
+            if d < 44:
+                self.state = 'active'
+                self.timer = self.ACTIVE_DUR
+                self.attack_cd = 0.0
+                if self._snd_bark:
+                    self._snd_bark.play()
+                particles.burst(self.x, self.y, WHITE, 10, 2.5)
+            else:
+                self.x += dx / d * self.ARRIVE_SPEED
+                self.y += dy / d * self.ARRIVE_SPEED
+            return
+
+        # active
+        self.timer -= dt
+        self.attack_cd = max(0.0, self.attack_cd - dt)
+        if self.timer <= 0:
+            self.state = 'idle'
+            self.call_cd = self.CALL_CD
+            return
+
+        # Leash: snap back to Superman's side rather than get left far behind
+        if math.hypot(superman.x - self.x, superman.y - self.y) > self.TELEPORT_DIST:
+            angle = random.uniform(0, math.pi * 2)
+            self.x = superman.x + math.cos(angle) * 160
+            self.y = superman.y + math.sin(angle) * 160
+            particles.burst(self.x, self.y, WHITE, 8, 2)
+
+        nearest, best_d = None, self.LEASH_RANGE
+        for e in enemies:
+            if not e.alive:
+                continue
+            d = math.hypot(e.x - superman.x, e.y - superman.y)
+            if d < best_d:
+                best_d, nearest = d, e
+
+        if nearest is not None:
+            dx, dy = nearest.x - self.x, nearest.y - self.y
+            d = math.hypot(dx, dy)
+            if dx:
+                self.face_right = dx > 0
+            if d > self.ATTACK_RANGE:
+                self._animate(dt, 'run')
+                if d > 1:
+                    self.x += dx / d * self.CHASE_SPEED
+                    self.y += dy / d * self.CHASE_SPEED
+            else:
+                self._animate(dt, 'bite')
+                if self.attack_cd <= 0:
+                    self.attack_cd = self.ATTACK_CD
+                    nearest.take_damage(self.ATTACK_DMG)
+                    particles.burst(nearest.x, nearest.y, WHITE, 5, 2)
+        else:
+            self._orbit_angle += self.ORBIT_SPEED * dt
+            tx = superman.x + math.cos(self._orbit_angle) * self.ORBIT_RADIUS
+            ty = superman.y + math.sin(self._orbit_angle) * self.ORBIT_RADIUS
+            dx, dy = tx - self.x, ty - self.y
+            d = math.hypot(dx, dy)
+            if dx:
+                self.face_right = dx > 0
+            self._animate(dt, 'run')
+            if d > 2:
+                self.x += dx / d * min(self.CHASE_SPEED, d)
+                self.y += dy / d * min(self.CHASE_SPEED, d)
+
+    def draw(self, surface, cam):
+        if self.state not in ('incoming', 'active'):
+            return
+        frames = self._run_frames if self._current_anim == 'run' else self._bite_frames
+        if not frames:
+            return
+        frame = frames[self._frame % len(frames)]
+        img = pygame.transform.flip(frame, True, False) if self.face_right else frame
+        sx = int(self.x - cam.x)
+        sy = int(self.y - cam.y)
+        surface.blit(img, img.get_rect(center=(sx, sy)))
