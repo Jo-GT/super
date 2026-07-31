@@ -724,6 +724,10 @@ class LexGoon(Thug):
         elif self.frozen > 0:
             img = sprite.copy()
             img.fill((0, 60, 90, 0), special_flags=pygame.BLEND_RGB_ADD)
+        # This sprite's head is turned to its left, so flip when facing right
+        # (the opposite of the Thug sheets, which are drawn facing right).
+        if self.face_right:
+            img = pygame.transform.flip(img, True, False)
         rect = img.get_rect(center=(sx, sy))
         surface.blit(img, rect)
         draw_health_bar(surface, sx, rect.top - 8, self.hp, self.max_hp, self.RADIUS * 2)
