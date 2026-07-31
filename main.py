@@ -60,11 +60,32 @@ def _load_sound(filename):
 
 snd_wind      = _load_sound("flying wind noise.ogg")
 snd_sprint    = _load_sound("beginsprint.ogg")
-snd_heat      = _load_sound("heatvision.ogg")
 snd_freeze    = _load_sound("freeze breath.ogg")
 snd_punch     = _load_sound("punch.ogg")
 snd_xray      = _load_sound("xrayvision.ogg")
 snd_gameover  = _load_sound("GameOver.ogg")
+
+# Heat vision is held down, so its sound has to sustain for as long as the
+# player likes. The original heatvision.ogg is a self-contained 4s one-shot —
+# charge-up, swell, blast, fade — so looping it whole replayed the swell and
+# the fade every 4 seconds instead of holding a steady beam. It is split into
+# three clips: an intro, a body that loops seamlessly, and a tail-off played
+# on release.
+#
+# Two intros are available. "full" opens with the quiet charge-up before the
+# swell; "swell" skips the charge and leads with the swell itself.
+HEAT_INTRO_VARIANT = "full"   # "full" | "swell"
+
+snd_heat_intro = _load_sound(f"heatvision-intro-{HEAT_INTRO_VARIANT}.ogg")
+snd_heat_loop  = _load_sound("heatvision-loop.ogg")
+snd_heat_tail  = _load_sound("heatvision-tail.ogg")
+
+# The intro clips run on into the blast and fade out over their final
+# HEAT_LOOP_LEAD_IN seconds, so the looping body is faded in underneath them
+# over the same window rather than stacking at full volume (which clipped).
+# The window is also wide enough to absorb frame-timing jitter — the handover
+# can only ever land late, and landing late just shortens the crossfade.
+HEAT_LOOP_LEAD_IN = 0.12
 
 _MENU_MUSIC_PATH = os.path.join(_SOUNDS_DIR, "mainmenutheme.ogg")
 _BGM_MUSIC_PATH  = os.path.join(_SOUNDS_DIR, "MainBGM.ogg")
@@ -486,7 +507,8 @@ class Game:
         self._active_event: BaseEvent | None = None
         self._notifications: list[tuple] = []  # (text, color, timer)
         self._wind_playing = False
-        self._heat_playing = False
+        self._heat_phase = None   # None | 'intro' | 'loop'
+        self._heat_t = 0.0        # seconds into the intro clip
         self._freeze_playing = False
         self._shift_prev = False
         self._xray_prev = False
@@ -539,13 +561,7 @@ class Game:
         s.heat_firing = bool(keys[pygame.K_SPACE] or mouse_buttons[0])
         if s.heat_firing and s.heat_cd <= 0:
             s.try_heat_vision(all_enemies, self.pfs)
-        if snd_heat:
-            if s.heat_firing and not self._heat_playing:
-                snd_heat.play(loops=-1)
-                self._heat_playing = True
-            elif not s.heat_firing and self._heat_playing:
-                snd_heat.stop()
-                self._heat_playing = False
+        self._update_heat_audio(s.heat_firing, dt)
 
         # Freeze Breath: F or RMB (held for a continuous frost cone)
         s.freeze_active = bool(keys[pygame.K_f] or mouse_buttons[2])
@@ -600,17 +616,65 @@ class Game:
 
         s.update(dt, keys, mouse_world)
 
+    def _update_heat_audio(self, firing, dt):
+        """Drive the three-part beam sound: intro, looping body, tail-off.
+
+        The trigger is a level read, so this tracks how far through that
+        sequence we are rather than a single is-it-playing flag.
+        """
+        if snd_heat_loop is None:
+            return
+
+        if not firing:
+            if self._heat_phase is not None:
+                # Only tail off from a blast the player actually heard; an
+                # intro cut short is its own ending.
+                self._stop_heat_audio(tail=self._heat_phase == 'loop')
+            return
+
+        if self._heat_phase is None:
+            if snd_heat_intro:
+                snd_heat_intro.play()
+                self._heat_phase = 'intro'
+                self._heat_t = 0.0
+            else:
+                snd_heat_loop.play(loops=-1)
+                self._heat_phase = 'loop'
+        elif self._heat_phase == 'intro':
+            self._heat_t += dt
+            if self._heat_t >= snd_heat_intro.get_length() - HEAT_LOOP_LEAD_IN:
+                snd_heat_loop.play(loops=-1, fade_ms=int(HEAT_LOOP_LEAD_IN * 1000))
+                self._heat_phase = 'loop'
+
+    def _stop_heat_audio(self, tail=False):
+        """Release the beam. With tail=True it fades into the tail-off clip;
+        without, everything cuts immediately (pause, death)."""
+        for snd in (snd_heat_intro, snd_heat_loop):
+            if not snd:
+                continue
+            if tail:
+                # Fade rather than cut: the body loops at full volume, so
+                # stopping it dead mid-waveform clicks.
+                snd.fadeout(25)
+            else:
+                snd.stop()
+        if snd_heat_tail:
+            if tail:
+                snd_heat_tail.play()
+            else:
+                snd_heat_tail.stop()
+        self._heat_phase = None
+        self._heat_t = 0.0
+
     def stop_sounds(self):
         if snd_wind:
             snd_wind.stop()
-        if snd_heat:
-            snd_heat.stop()
+        self._stop_heat_audio()
         if snd_freeze:
             snd_freeze.stop()
         if snd_xray:
             snd_xray.stop()
         self._wind_playing = False
-        self._heat_playing = False
         self._freeze_playing = False
 
     def update(self, dt):
