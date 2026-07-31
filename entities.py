@@ -294,9 +294,6 @@ class Superman:
 
     # ── Powers ────────────────────────────────────────────────────────────────
 
-    def can_use_heat_vision(self):
-        return self.heat_cd <= 0
-
     def aim_angle(self):
         """Direction from the head to the cursor, for anything fired from it.
 

@@ -24,9 +24,9 @@ jobs:
 
       - name: Build WebAssembly bundle
         # pygbag hard-fails on any .mp3 asset (unreliable browser/WASM MP3
-        # decoding) unless this is passed. Sounds/ ships mp3s, so suppress
-        # the check rather than block every build; consider re-encoding to
-        # ogg later for more reliable in-browser playback.
+        # decoding) unless this is passed. Sounds/ is all ogg now, so nothing
+        # should trip it -- the flag stays as a guard against a stray mp3
+        # silently blocking a deploy.
         run: python -m pygbag --build --disable-sound-format-error main.py
 
       - name: Publish build output into docs/

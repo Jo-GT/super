@@ -227,10 +227,6 @@ class HUD:
     MINIMAP_X = SCREEN_W - 210
     MINIMAP_Y = SCREEN_H - 170
 
-    def __init__(self):
-        self._score_anim = 0
-        self._last_score = 0
-
     def draw(self, surface, superman, events, camera, active_event=None, krypto=None):
         # ── Health bar ───────────────────────────────────────────────────────
         hp_ratio = superman.hp / superman.MAX_HP
@@ -875,9 +871,6 @@ class Game:
             alpha = min(255, int(timer * 200))
             y = SCREEN_H // 2 - 60 - i * 32
             draw_text(screen, text, font_large, (*color[:3], alpha), SCREEN_W // 2, y, center=True)
-
-    def can_use_heat_vision(self):
-        return self.superman.heat_cd <= 0
 
 
 # ─── MENU ─────────────────────────────────────────────────────────────────────
