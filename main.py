@@ -239,14 +239,14 @@ class HUD:
             ratio = cd / max_cd if max_cd > 0 else 0
             cooldown_icon(surface, ix, icon_y, icon_sz, col, label, ratio, key)
 
-        # Duration bars under the icons of powers that run on a timer.
-        # Looked up by label rather than by a hardcoded index: KRYPTO is only
-        # in the row conditionally, so any fixed index is wrong half the time.
+        # Duration bars, for the powers that run for a period rather than firing
+        # instantly. Position is derived from the row instead of hardcoded, so
+        # adding or reordering a power can't leave a bar under the wrong icon --
+        # which is exactly what happened to the index 4 here once XRAY took that
+        # slot and pushed KRYPTO along. .index() raises if a label is renamed,
+        # rather than silently drawing no bar at all.
         def duration_bar(label, pct, col):
-            idx = next((i for i, p in enumerate(powers) if p[0] == label), None)
-            if idx is None:
-                return
-            bx = start_x + idx * (icon_sz + 8)
+            bx = start_x + [p[0] for p in powers].index(label) * (icon_sz + 8)
             pygame.draw.rect(surface, col, (bx, icon_y + icon_sz - 6, int(icon_sz * pct), 4))
 
         if superman.speed_remaining > 0:

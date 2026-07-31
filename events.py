@@ -725,7 +725,8 @@ class Crate:
     """
     SIZE = 56
     HP   = 50
-    biteable = False    # Krypto must not pick one of these for you
+    # Which crate to destroy is the whole decision here, so no ally may make it
+    minion_auto_attack = False
 
     def __init__(self, x, y, content):
         self.x, self.y = float(x), float(y)

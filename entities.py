@@ -1226,6 +1226,13 @@ class Krypto:
 
     States: idle -> calling (whistle playing) -> incoming (flying to Superman)
     -> active (fighting/orbiting) -> back to idle with the cooldown running.
+
+    Objects in the enemies list may set `minion_auto_attack = False` to opt out
+    of being targeted (see the target loop in update). Not everything an event
+    exposes as an "enemy" is meant to be cleared by force -- some events use
+    that list for things the player has to pick between deliberately, where an
+    ally choosing on its own would resolve or fail the event on their behalf.
+    Any future minion should honour the same flag.
     """
 
     CALL_CD       = 35.0
@@ -1349,11 +1356,11 @@ class Krypto:
 
         nearest, best_d = None, self.LEASH_RANGE
         for e in enemies:
-            # biteable lets an event opt its objects out of being auto-attacked.
-            # The decoy crates ride in the same enemies list so heat vision and
-            # punch can hit them, but a dog picking one at random would fail
-            # that event without the player ever making the call.
-            if not e.alive or not getattr(e, 'biteable', True):
+            # An event's enemies list is also how it exposes objects to the
+            # player's own powers, so it can hold things that are a decision
+            # rather than a fight. Those opt out here, otherwise a minion picks
+            # for the player and the event resolves without them.
+            if not e.alive or not getattr(e, 'minion_auto_attack', True):
                 continue
             d = math.hypot(e.x - superman.x, e.y - superman.y)
             if d < best_d:
