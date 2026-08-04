@@ -381,6 +381,28 @@ class FallingEvent(BaseEvent):
 
 # ─── RUNAWAY CAR ──────────────────────────────────────────────────────────────
 
+class Car:
+    """Quacks like an Enemy -- {x, y, take_damage, freeze} -- so it rides along
+    in main.py's all_enemies list and a Q-punch (Superman auto-dashes onto the
+    nearest thing in range) stops it with no special-casing, the same trick
+    Crate uses. HP is tuned so one punch (55) always ends it."""
+    HP = 50
+    minion_auto_attack = True
+
+    def __init__(self, x, y):
+        self.x, self.y = x, y
+        self.hp = self.HP
+        self.alive = True
+
+    def take_damage(self, amount):
+        self.hp -= amount
+        if self.hp <= 0:
+            self.alive = False
+
+    def freeze(self, duration):
+        pass  # tires don't care; try_freeze needs the method to exist
+
+
 class CarEvent(BaseEvent):
     INNER_RADIUS = 300
     CAR_SPEED = 200.0
@@ -395,6 +417,8 @@ class CarEvent(BaseEvent):
         self.car_angle = angle
         self.stopped = False
         self._traveled = 0.0
+        self.car = Car(self.car_x, self.car_y)
+        self.enemies = [self.car]
         # Pedestrians in the path
         self.pedestrians = [
             Civilian(x + math.cos(angle) * random.uniform(150, 300) + random.uniform(-30, 30),
@@ -409,20 +433,25 @@ class CarEvent(BaseEvent):
         super().update(dt, superman, particles)
         if self.stopped:
             return
+        # Stays parked -- and un-failable -- until Superman is close enough to
+        # actually notice it. Previously it drove off (and could time out or
+        # flatten a pedestrian) the instant it was spawned, often long before
+        # the player was anywhere nearby to see it, let alone react.
+        if not self.active:
+            return
+
+        if not self.car.alive:
+            self.stopped = True
+            particles.shockwave(self.car_x, self.car_y)
+            self.complete = True
+            return
 
         self.car_x += self.car_vx * dt
         self.car_y += self.car_vy * dt
+        self.car.x, self.car.y = self.car_x, self.car_y
         self._traveled += math.hypot(self.car_vx, self.car_vy) * dt
 
-        # Superman punch stops the car
-        if superman.punch_cd > 0 and superman.punch_cd < 1.5:
-            if math.hypot(superman.x - self.car_x, superman.y - self.car_y) < 80:
-                self.stopped = True
-                particles.shockwave(self.car_x, self.car_y)
-                self.complete = True
-                return
-
-        # Collision with Superman body also stops it
+        # Collision with Superman body also stops it (ram it while super-speeding)
         if math.hypot(superman.x - self.car_x, superman.y - self.car_y) < 30:
             if superman.speed_remaining > 0:
                 self.stopped = True
