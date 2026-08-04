@@ -118,8 +118,9 @@ def _load_krypto_sound(filename):
 _ANIMAL_SPRITE_FILES = {
     'cat': ["black cat.png", "brown cat.png", "white cat.png"],
     'dog': ["black dog.png", "brown dog.png", "white dog.png"],
+    'bird': ["bird.png"],
 }
-_ANIMAL_TARGET_H = {'cat': 30, 'dog': 24}
+_ANIMAL_TARGET_H = {'cat': 30, 'dog': 24, 'bird': 20}
 _animal_sprite_cache = {}
 
 

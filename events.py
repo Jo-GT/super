@@ -11,6 +11,7 @@ _SPRITES_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprite
 _tree_sprite = None
 _falling_sprite = None
 _fire_frames = None
+_car_sprite = None
 
 
 def _get_tree_sprite():
@@ -18,6 +19,14 @@ def _get_tree_sprite():
     if _tree_sprite is None:
         _tree_sprite = load_game_sprite("Environment/tree.png", (140, 140)) or False
     return _tree_sprite or None
+
+
+def _get_car_sprite():
+    # Portrait orientation, nose pointing up -- rotated per travel direction at draw time.
+    global _car_sprite
+    if _car_sprite is None:
+        _car_sprite = load_game_sprite("Environment/red car.png", (20, 46)) or False
+    return _car_sprite or None
 
 
 def _get_falling_sprite():
@@ -479,13 +488,19 @@ class CarEvent(BaseEvent):
         sx = int(self.car_x - cam.x)
         sy = int(self.car_y - cam.y)
         angle = self.car_angle
-        pts = [_rot_pt(sx, sy, *p, angle) for p in [(-22, -10), (22, -10), (24, -5), (24, 5), (22, 10), (-22, 10)]]
-        pygame.draw.polygon(surface, (180, 30, 30), pts)
-        pygame.draw.polygon(surface, (220, 50, 50), pts, 2)
-        # Wheels
-        for wx, wy in [(-14, -10), (14, -10), (-14, 10), (14, 10)]:
-            wsx, wsy = _rot_pt(sx, sy, wx, wy, angle)
-            pygame.draw.circle(surface, BLACK, (int(wsx), int(wsy)), 5)
+        car_sprite = _get_car_sprite()
+        if car_sprite is not None:
+            rotated = pygame.transform.rotate(car_sprite, -math.degrees(angle) - 90)
+            rect = rotated.get_rect(center=(sx, sy))
+            surface.blit(rotated, rect)
+        else:
+            pts = [_rot_pt(sx, sy, *p, angle) for p in [(-22, -10), (22, -10), (24, -5), (24, 5), (22, 10), (-22, 10)]]
+            pygame.draw.polygon(surface, (180, 30, 30), pts)
+            pygame.draw.polygon(surface, (220, 50, 50), pts, 2)
+            # Wheels
+            for wx, wy in [(-14, -10), (14, -10), (-14, 10), (14, 10)]:
+                wsx, wsy = _rot_pt(sx, sy, wx, wy, angle)
+                pygame.draw.circle(surface, BLACK, (int(wsx), int(wsy)), 5)
         # Speed lines
         for i in range(3):
             ta = angle + math.pi + random.uniform(-0.3, 0.3)
