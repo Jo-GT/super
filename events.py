@@ -394,6 +394,7 @@ class CarEvent(BaseEvent):
         self.car_vy = math.sin(angle) * self.CAR_SPEED
         self.car_angle = angle
         self.stopped = False
+        self._started = False
         self._traveled = 0.0
         # Pedestrians in the path
         self.pedestrians = [
@@ -403,11 +404,14 @@ class CarEvent(BaseEvent):
         ]
 
     def on_activate(self, superman):
-        pass
+        self._started = True
 
     def update(self, dt, superman, particles):
         super().update(dt, superman, particles)
-        if self.stopped:
+        # Car sits still (and can't fail) until Superman is close enough to
+        # notice it, same as the falling person: otherwise it can run its
+        # whole course and crash before the player ever gets a shot at it.
+        if not self._started or self.stopped:
             return
 
         self.car_x += self.car_vx * dt
