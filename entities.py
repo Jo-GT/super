@@ -691,7 +691,7 @@ class Thug(Enemy):
             self.shots_fired += 1
             self._set_anim('shot')
             self.projectiles.append(
-                Projectile(self.x, self.y, self._angle, self.SHOT_SPEED, (255, 210, 120), 6, 1.6))
+                Projectile(self.x, self.y, self._angle, self.SHOT_SPEED, (255, 210, 120), 3, 1.6, shape='bullet'))
             particles.burst(self.x + math.cos(self._angle) * 22, self.y + math.sin(self._angle) * 22,
                              (255, 200, 80), 4, 2)
             if self.shots_fired >= self.MAG_SIZE:
@@ -1071,14 +1071,17 @@ class LexMechSuit(Enemy):
 # ─── PROJECTILE ──────────────────────────────────────────────────────────────
 
 class Projectile:
-    def __init__(self, x, y, angle, speed, color, radius=5, life=2.0):
+    def __init__(self, x, y, angle, speed, color, radius=5, life=2.0, shape='orb'):
         self.x, self.y = float(x), float(y)
+        self.angle = angle
         self.vx = math.cos(angle) * speed
         self.vy = math.sin(angle) * speed
         self.color = color
         self.radius = radius
         self.life = life
         self.dead = False
+        self.shape = shape  # 'orb': soft glowing blast (robots/energy weapons)
+                             # 'bullet': thin tracer streak (gun-toting thugs/goons)
 
     def update(self, dt):
         self.x += self.vx * 60 * dt
@@ -1099,6 +1102,13 @@ class Projectile:
     def draw(self, surface, cam):
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
+        if self.shape == 'bullet':
+            length = self.radius * 5
+            tx = sx - math.cos(self.angle) * length
+            ty = sy - math.sin(self.angle) * length
+            pygame.draw.line(surface, self.color, (tx, ty), (sx, sy), max(1, self.radius // 2))
+            pygame.draw.circle(surface, WHITE, (sx, sy), max(1, self.radius // 2))
+            return
         gs = pygame.Surface((self.radius * 4, self.radius * 4), pygame.SRCALPHA)
         pygame.draw.circle(gs, (*self.color, 120), (self.radius * 2, self.radius * 2), self.radius * 2)
         pygame.draw.circle(gs, (*self.color, 255), (self.radius * 2, self.radius * 2), self.radius)
