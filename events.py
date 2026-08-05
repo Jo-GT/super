@@ -1190,10 +1190,9 @@ class MeteorEvent(BaseEvent):
     INNER_RADIUS = 350        # only the beacon's fade range now; the meteor
                               # wakes as soon as it is on screen
 
-    DESCENT_TIME = 19.5       # 390px of fall at 20px/s -- double the old
-                              # descent rate over 1.5x the distance, so it
-                              # closes noticeably faster than it used to while
-                              # still leaving room for either kill.
+    DESCENT_TIME = 15.0       # 390px of fall at 26px/s. Still leaves room for
+                              # either kill: the overload needs 6s of held beam
+                              # and a committed punch run lands in about 6s.
     FROZEN_MUL   = 0.25       # the same slow Enemy._move_toward applies. Never
                               # 0: freeze has to buy time, not stall the event
                               # forever, and alt must stay monotonic so this
@@ -1203,9 +1202,10 @@ class MeteorEvent(BaseEvent):
                               # it comes in on a slant instead of dropping.
                               # Scaled with ALTITUDE_PX so the approach keeps
                               # the same angle, just a longer run at it.
-    R_HIGH, R_LOW = 60, 184   # drawn radius at alt 1 and at impact. Big enough
-                              # that the shadow, reticle and bars below are all
-                              # sized off R_LOW rather than fixed pixels.
+    R_HIGH, R_LOW = 30, 92    # drawn radius at alt 1 and at impact. The
+                              # shadow, reticle, trail and bars are all sized
+                              # off these rather than fixed pixels, so rescaling
+                              # the rock rescales everything that hangs off it.
     HEAT_RATE    = 1 / 6.0    # 6s of held, on-target beam to overload
     HEAT_DECAY   = 0.05       # 20s to cool from full. Crate.char never decays
                               # because it is a warning; this is a win
@@ -1478,7 +1478,7 @@ class MeteorEvent(BaseEvent):
 
         self._draw_rock(surface, msx, msy, r)
 
-        bw = 140                                  # widened to suit the rock
+        bw = max(64, int(r * 1.3))                # kept in proportion to the rock
         draw_health_bar(surface, msx, msy - r - 26, self.core.hp, Meteor.HP, width=bw)
         # Not draw_health_bar: its green->gold->red ramp runs the wrong way for
         # a meter that is dangerous when full.
