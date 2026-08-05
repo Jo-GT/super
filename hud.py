@@ -200,15 +200,19 @@ class HUD:
         for ev in events:
             if ev.complete or ev.failed:
                 continue
-            esx = ev.x - camera.x
-            esy = ev.y - camera.y
+            # The nearest live piece of the objective, not the spawn point:
+            # enemies wander, the car drives off, the meteor is in the sky.
+            fx, fy = ev.focus_pos(superman)
+            esx = fx - camera.x
+            esy = fy - camera.y
             # Signed distance past the visible band; <= 0 means it's on screen
             # and its own world glyph is doing the job.
             out = max(VIS_MARGIN - esx, esx - (SCREEN_W - VIS_MARGIN),
                       VIS_MARGIN - esy, esy - (SCREEN_H - VIS_MARGIN))
             if out <= 0:
                 continue
-            candidates.append((0 if ev.active else 1, ev.dist_to(superman), out, ev))
+            d = math.hypot(fx - superman.x, fy - superman.y)
+            candidates.append((0 if ev.active else 1, d, out, ev, fx, fy))
 
         # Active events first. Once an event activates BaseEvent.draw stops
         # drawing its ring entirely, so an active event you've flown away from
@@ -218,9 +222,9 @@ class HUD:
         candidates.sort(key=lambda c: (c[0], c[1]))
 
         half = MARK_SURF // 2
-        for _, dist, out, ev in candidates[:MARK_MAX]:
-            dx = ev.x - superman.x
-            dy = ev.y - superman.y
+        for _, dist, out, ev, fx, fy in candidates[:MARK_MAX]:
+            dx = fx - superman.x
+            dy = fy - superman.y
             d = math.hypot(dx, dy)
             if d < 1e-6:
                 continue        # unreachable while out > 0; guards the divide

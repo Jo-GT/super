@@ -150,3 +150,92 @@ def test_every_event_can_be_asked_for_marker_art():
     for etype, factory in EVENT_FACTORIES.items():
         ev = factory(100, 100)
         ev.marker_sprite()          # must not raise for any event
+
+
+# ─── what the arrow points at ─────────────────────────────────────────────────
+
+class _Sup:
+    def __init__(self, x, y):
+        self.x, self.y = float(x), float(y)
+        self.heat_firing = False
+        self.freeze_active = False
+        self.xray_remaining = 0.0
+
+    def heat_covers(self, wx, wy, threshold=28):
+        return False
+
+
+def test_marker_follows_an_enemy_that_wanders_off():
+    """Pointing at the spawn is wrong the moment anything moves."""
+    from events import make_criminals_event
+    from particles import ParticleSystem
+
+    ev = make_criminals_event(2000, 2000)
+    sup = _Sup(2000, 2000)
+    ev.update(1 / 60, sup, ParticleSystem())        # wakes and spawns thugs
+    assert ev.enemies
+    for e in ev.enemies:                             # send them all far east
+        e.x, e.y = 3000.0, 2000.0
+    ev.enemies[0].x = 2600.0                         # this one is nearest
+    fx, fy = ev.focus_pos(sup)
+    assert (fx, fy) == (2600.0, 2000.0)
+    assert fx != ev.x, "must not still be aimed at the spawn"
+
+
+def test_marker_falls_back_to_the_spawn_when_nothing_is_left():
+    from events import make_criminals_event
+    ev = make_criminals_event(2000, 2000)
+    assert ev.focus_pos(_Sup(0, 0)) == (ev.x, ev.y)
+
+
+def test_marker_tracks_the_meteor_in_the_sky_not_its_crater():
+    from events import MeteorEvent
+    from particles import ParticleSystem
+
+    ev = MeteorEvent(2000, 2000)
+    sup = _Sup(2000, 2000)
+    ev.active = True
+    ev.on_activate(sup)
+    fx, fy = ev.focus_pos(sup)
+    assert (fx, fy) == (ev.core.x, ev.core.y)
+    assert fy < ev.target_y, "should point up at the rock, not down at the target"
+
+
+def test_marker_tracks_the_runaway_car():
+    from events import CarEvent
+    ev = CarEvent(2000, 2000)
+    ev.car.x, ev.car.y = 2500.0, 2100.0
+    assert ev.focus_pos(_Sup(0, 0)) == (2500.0, 2100.0)
+
+
+def test_marker_tracks_the_falling_person():
+    from events import FallingEvent
+    ev = FallingEvent(2000, 2000)
+    ev.person_y += 120
+    assert ev.focus_pos(_Sup(0, 0)) == (ev.person_x, ev.person_y)
+
+
+def test_hostage_marker_switches_to_the_hostage_once_the_thugs_are_down():
+    from events import HostageEvent
+    from particles import ParticleSystem
+
+    ev = HostageEvent(2000, 2000)
+    sup = _Sup(2000, 2000)
+    ev.update(1 / 60, sup, ParticleSystem())
+    assert ev.focus_pos(sup) in [(e.x, e.y) for e in ev.enemies]
+    for e in ev.enemies:
+        e.alive = False
+    assert ev.focus_pos(sup) == (ev.hostage.x, ev.hostage.y)
+
+
+def test_every_event_can_be_asked_where_to_point():
+    import pygame
+
+    from events import EVENT_FACTORIES
+
+    pygame.display.set_mode((320, 240))
+    sup = _Sup(500, 500)
+    for etype, factory in EVENT_FACTORIES.items():
+        ev = factory(400, 400)
+        x, y = ev.focus_pos(sup)                     # must not raise, ever
+        assert isinstance(x, (int, float)) and isinstance(y, (int, float))

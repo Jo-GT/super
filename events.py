@@ -171,6 +171,10 @@ class BaseEvent:
         # needing superman passed down to it. Starts far so an event drawn
         # before its first update still shows one.
         self._player_dist = float('inf')
+        # Latched once you reach the area, never cleared. Not a live distance
+        # test: chasing an enemy back out past BEACON_R would pop the beacon
+        # up again behind you, in the middle of a fight you are already in.
+        self._arrived = False
         self.score_value = SCORE_TABLE[event_type]
 
     def dist_to(self, superman):
@@ -202,6 +206,8 @@ class BaseEvent:
         self._pulse += dt * 3.5
         self._age += dt
         self._player_dist = self.dist_to(superman)
+        if self._player_dist <= max(self.BEACON_R, self.INNER_RADIUS):
+            self._arrived = True
         self.check_activation(superman)
 
     def draw(self, surface, cam):
@@ -215,7 +221,7 @@ class BaseEvent:
         # would mean the beacon never rendered at all. Range keeps the old
         # behaviour on screen -- a pulsing marker that hands over to the event's
         # own art as you arrive.
-        if self._player_dist > max(self.BEACON_R, self.INNER_RADIUS):
+        if not self._arrived:
             r = int(24 + 6 * math.sin(self._pulse))
             gs = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
             alpha = int(100 + 80 * abs(math.sin(self._pulse)))
@@ -224,6 +230,31 @@ class BaseEvent:
             pygame.draw.circle(surface, color, (sx, sy), 16)
             pygame.draw.circle(surface, WHITE, (sx, sy), 16, 2)
             self._draw_icon(surface, sx, sy)
+
+    def focus_points(self):
+        """Live pieces of the objective, in world coords.
+
+        Defaults to whatever is in self.enemies, which already covers the
+        fights, the crates, the runaway car and the meteor. Events whose
+        objective is something else override it.
+        """
+        return [(e.x, e.y) for e in getattr(self, 'enemies', ())
+                if getattr(e, 'alive', True)]
+
+    def focus_pos(self, superman):
+        """Where an off-screen marker should point: the nearest live piece of
+        the objective, falling back to the spawn point when nothing is left.
+
+        Pointing at the spawn is wrong as soon as anything moves -- a thug who
+        has chased you three blocks is the thing you actually need to find, and
+        an arrow aimed at where the fight started sends you the wrong way.
+        """
+        best, best_d = (self.x, self.y), float('inf')
+        for px, py in self.focus_points():
+            d = (px - superman.x) ** 2 + (py - superman.y) ** 2
+            if d < best_d:
+                best_d, best = d, (px, py)
+        return best
 
     def marker_sprite(self):
         """Art for this event's off-screen marker, or None to fall back to
@@ -332,6 +363,13 @@ class HostageEvent(BaseEvent):
         if self.hostage:
             self.hostage.draw(surface, cam)
 
+    def focus_points(self):
+        # The thugs while they stand; the hostage herself once they are down.
+        pts = super().focus_points()
+        if not pts and self.hostage and not self.hostage.saved:
+            pts = [(self.hostage.x, self.hostage.y)]
+        return pts
+
     def _draw_icon(self, surface, sx, sy):
         pygame.draw.circle(surface, (220, 180, 130), (sx, sy - 2), 5)
         pygame.draw.line(surface, (220, 180, 130), (sx, sy + 3), (sx, sy + 10), 2)
@@ -436,6 +474,11 @@ class FireEvent(BaseEvent):
             pygame.draw.rect(surface, col, (sx - 40, sy - 90, int(80 * ratio), 8))
         super().draw(surface, cam)
 
+    def focus_points(self):
+        # Flames while any burn, then the citizens still to be carried out.
+        pts = [f for f, hp in zip(self.flames, self.flame_hp) if hp > 0]
+        return pts or [(c.x, c.y) for c in self.citizens if not c.saved]
+
     def _draw_icon(self, surface, sx, sy):
         # Flame
         pygame.draw.polygon(surface, FIRE_HOT, [(sx, sy - 8), (sx - 5, sy + 5), (sx + 5, sy + 5)])
@@ -509,6 +552,9 @@ class FallingEvent(BaseEvent):
         progress = max(0, (self.ground_y - self.person_y) / (self.ground_y - (self.y - 280)))
         pygame.draw.rect(surface, (80, 0, 0), (sx - 20, bar_y, 40, 5))
         pygame.draw.rect(surface, RED, (sx - 20, bar_y, int(40 * progress), 5))
+
+    def focus_points(self):
+        return [(self.person_x, self.person_y)]
 
     def _draw_icon(self, surface, sx, sy):
         pygame.draw.circle(surface, FLESH, (sx, sy - 4), 5)
@@ -695,6 +741,9 @@ class CatEvent(BaseEvent):
         self.cat.draw(surface, cam)
         super().draw(surface, cam)
 
+    def focus_points(self):
+        return [(self.cat.x, self.cat.y)]
+
     def _draw_icon(self, surface, sx, sy):
         # Paw print
         pygame.draw.circle(surface, GREEN, (sx, sy), 5)
@@ -748,6 +797,9 @@ class FloodEvent(BaseEvent):
             remaining = sum(1 for a in self.animals if not a.saved)
             if remaining > 0:
                 self.failed = True
+
+    def focus_points(self):
+        return [(a.x, a.y) for a in self.animals if not a.saved]
 
     def draw(self, surface, cam):
         if self.complete or self.failed:
@@ -1278,28 +1330,57 @@ class MeteorEvent(BaseEvent):
             self._impact(particles)
 
     def _emit_trail(self, dt, particles, mx, my):
+        """A wake as wide as the rock, shed from its trailing face.
+
+        Everything used to be emitted from the centre point. Particles draw
+        after events (main.py:360-364), so the whole trail rendered *on top of*
+        the rock as a knot of sparks in its middle -- fine when it was 46px
+        across, absurd at 184. Emission now starts behind the trailing edge and
+        is spread across the rock's own width, so the tail reads as coming off
+        the thing rather than out of it.
+        """
         step = 1.0 / self.TRAIL_HZ
         self._trail_t += dt
+        r = self._radius()
+        back = self._travel_ang + math.pi
+        bx, by = math.cos(back), math.sin(back)
+        px, py = -by, bx                      # across the direction of travel
+        sz = max(5, r * 0.13)
+
         while self._trail_t >= step:
             self._trail_t -= step
-            # ParticleSystem.trail emits at angle + pi, i.e. backwards along
-            # travel, which is exactly the wake we want.
-            ang = self._travel_ang
-            particles.trail(mx, my, FIRE_HOT, ang, spread=0.5,
-                            count=1 + int(2 * self.heat), speed=2.2, life=0.55, size=6)
-            particles.trail(mx, my, FIRE_WARM, ang, spread=0.8,
-                            count=1, speed=1.5, life=0.8, size=5)
-            if random.random() < 0.5:
-                particles.trail(mx, my, GRAY, ang, spread=1.0,
-                                count=1, speed=0.9, life=1.3, size=7)
+            for _ in range(3):
+                # triangular, so the plume is densest along the centre line and
+                # thins towards the edges instead of sitting in two rails.
+                u = r * 0.88 * random.triangular(-1, 1, 0)
+                ex = mx + bx * r * 0.70 + px * u
+                ey = my + by * r * 0.70 + py * u
+                hot = random.random() < 0.55
+                particles.trail(ex, ey, FIRE_HOT if hot else FIRE_WARM,
+                                self._travel_ang, spread=0.30, count=1, speed=2.4,
+                                life=random.uniform(0.5, 0.9),
+                                size=int(sz * random.uniform(0.7, 1.2)))
+            # Smoke sheds from further back and hangs around longer, so the tail
+            # fades grey rather than simply stopping.
+            u = r * 0.85 * random.triangular(-1, 1, 0)
+            particles.trail(mx + bx * r * 1.05 + px * u, my + by * r * 1.05 + py * u,
+                            GRAY, self._travel_ang, spread=0.55, count=1, speed=1.0,
+                            life=random.uniform(1.0, 1.6), size=int(sz * 1.35))
             # Dripping embers. burst() is the only emitter taking gravity, and
             # at count=1 a random-direction spark with fall on it is exactly
             # what a shedding ember is -- no need to build Particle by hand.
-            if random.random() < 0.45:
-                particles.burst(mx, my, FIRE_WARM, count=1, speed=1.2,
-                                size=5, life=0.9, gravity=0.14)
+            if random.random() < 0.55:
+                # Off the trailing edge like everything else. Emitted from the
+                # centre they landed on the rock's own face, which -- particles
+                # drawing over events -- looked like yellow spots painted on it.
+                u = r * 0.7 * random.triangular(-1, 1, 0)
+                particles.burst(mx + bx * r * 0.85 + px * u,
+                                my + by * r * 0.85 + py * u, FIRE_WARM, count=1,
+                                speed=1.2, size=int(sz * 0.8), life=0.9, gravity=0.14)
             if self.core.frozen > 0 and random.random() < 0.5:
-                particles.burst(mx, my, ICE, count=2, speed=1.6, size=4, life=0.4)
+                u = r * 0.8 * random.triangular(-1, 1, 0)
+                particles.burst(mx + bx * r * 0.7 + px * u, my + by * r * 0.7 + py * u,
+                                ICE, count=2, speed=1.6, size=int(sz * 0.6), life=0.4)
 
     def _destroy(self, particles, mx, my):
         self._resolved = True
@@ -1423,14 +1504,23 @@ class MeteorEvent(BaseEvent):
         # frames in wasm. Radius is quantised to 8px and heat to 10 steps, so
         # the pulse and the descent both reuse a surface for many frames at a
         # time and it is only rebuilt when it would visibly differ.
-        ar = int(r * (1.85 + 0.40 * self.heat) + 3 * math.sin(self._pulse * 2))
+        # Three concentric bands rather than one big wash. A single circle at
+        # 1.85r and low alpha spread the same light over four times the area and
+        # read as a smudge over the city instead of as something around the
+        # rock; stacking a bright rim that hugs the surface under a wider, much
+        # fainter halo is what makes it look lit rather than tinted.
+        ar = int(r * 1.70 + 3 * math.sin(self._pulse * 2))
         key = (ar // 8, int(self.heat * 10))
         if key != self._aura_key:
             self._aura_key = key
+            h = self.heat
             aura = pygame.Surface((ar * 2, ar * 2), pygame.SRCALPHA)
-            pygame.draw.circle(aura, (*FIRE_HOT, int(34 + 96 * self.heat)), (ar, ar), ar)
-            pygame.draw.circle(aura, (*FIRE_WARM, int(48 + 112 * self.heat)),
-                               (ar, ar), int(ar * 0.64))
+            for frac, col, base, gain in (
+                    (1.00, FIRE_HOT,  26,  80),     # outer halo
+                    (0.76, FIRE_HOT,  60, 110),     # body of the glow
+                    (0.63, FIRE_WARM, 95, 150)):    # rim, tight to the surface
+                pygame.draw.circle(aura, (*col, min(255, int(base + gain * h))),
+                                   (ar, ar), int(ar * frac))
             self._aura = aura
         a = self._aura
         surface.blit(a, (msx - a.get_width() // 2, msy - a.get_height() // 2))
@@ -1443,7 +1533,14 @@ class MeteorEvent(BaseEvent):
         if self.core.frozen > 0:
             body = _lerp_col(body, ICE, 0.45)
         pygame.draw.circle(surface, body, (msx, msy), r)
-        pygame.draw.circle(surface, (26, 20, 18), (msx, msy), r, 2)
+        # An ember rim, not the old flat dark outline. Something falling this
+        # fast is burning on the way down whether or not anyone has shot it, and
+        # at heat 0 a plain grey disc read as a boulder someone had dropped.
+        # Heat still owns the *body* colour, so the gameplay signal is intact.
+        rim = _lerp_col((176, 74, 24), (255, 240, 210), self.heat)
+        if self.core.frozen > 0:
+            rim = _lerp_col(rim, ICE, 0.6)
+        pygame.draw.circle(surface, rim, (msx, msy), r, max(2, int(r * 0.055)))
         for cx, cy, cr in self._craters:
             pygame.draw.circle(surface, _lerp_col(body, (16, 12, 10), 0.45),
                                (msx + int(cx * r), msy + int(cy * r)),

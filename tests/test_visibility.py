@@ -96,10 +96,10 @@ def test_proximity_still_wakes_an_event_that_is_off_frame():
 
 
 def _beacon_shown(ev):
-    return ev._player_dist > max(ev.BEACON_R, ev.INNER_RADIUS)
+    return not ev._arrived
 
 
-def test_beacon_is_keyed_on_range_not_on_active():
+def test_beacon_is_not_keyed_on_active():
     """Waking on sight would otherwise mean the in-world marker never drew."""
     ev = CatEvent(MID + 600, MID)
     ev.update(1 / 60, _Sup(MID, MID), ParticleSystem())
@@ -115,8 +115,16 @@ def test_the_dot_clears_once_you_are_in_the_fight():
     assert ev.BEACON_R > 160
     ev.update(1 / 60, _Sup(MID + 200, MID), ParticleSystem())
     assert ev.active and not _beacon_shown(ev)
-    ev.update(1 / 60, _Sup(MID + 400, MID), ParticleSystem())
-    assert _beacon_shown(ev)
+
+
+def test_the_dot_stays_gone_once_you_have_been_there():
+    """Latched, not a live range test: chasing a thug back out would otherwise
+    pop the beacon up again behind you, mid-fight."""
+    ev = make_criminals_event(MID, MID)
+    ev.update(1 / 60, _Sup(MID + 100, MID), ParticleSystem())
+    assert not _beacon_shown(ev)
+    ev.update(1 / 60, _Sup(MID + 600, MID), ParticleSystem())    # gave chase
+    assert not _beacon_shown(ev)
 
 
 # ─── spawning ─────────────────────────────────────────────────────────────────
