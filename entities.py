@@ -433,6 +433,23 @@ class Superman:
         diff = abs((a - self.aim_angle() + math.pi) % (2 * math.pi) - math.pi)
         return diff < 0.75
 
+    def heat_covers(self, wx, wy, threshold=28):
+        """Whether the heat beam's line passes within `threshold` of (wx, wy).
+
+        The counterpart to freeze_covers, and the same contract: it answers
+        about geometry only, so the caller gates on self.heat_firing the way
+        FireEvent gates its douse on freeze_active.
+
+        Exists because try_heat_vision applies damage in HEAT_CD ticks against
+        an enemy list. Anything that instead accumulates against the beam
+        smoothly over dt -- a charge meter rather than a health pool -- has to
+        ask per frame, and doing that from outside meant reaching into _in_beam
+        and re-deriving the endpoint. threshold is a parameter because a target
+        that visibly grows wants a hitbox that grows with it.
+        """
+        tx, ty = self.heat_beam_target()
+        return self._in_beam(wx, wy, tx, ty, threshold)
+
     def draw(self, surface, cam):
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)

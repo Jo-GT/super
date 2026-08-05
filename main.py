@@ -179,6 +179,7 @@ class Game:
             if math.hypot(x - self.superman.x, y - self.superman.y) > self.MIN_SPAWN_D:
                 active_types = {e.event_type for e in self.events if not e.complete and not e.failed}
                 ev = spawn_random_event(x, y, exclude_types=active_types)
+                ev.city = self.city      # see BaseEvent.city
                 self.events.append(ev)
                 return
 
@@ -285,6 +286,7 @@ class Game:
         self._notifications = [[t, c, ti - dt] for t, c, ti in self._notifications if ti - dt > 0]
 
         # Events
+        spawned = []
         for ev in self.events:
             ev.update(dt, s, self.pfs)
             if ev.active and not getattr(ev, '_dialogue_intro_shown', False):
@@ -304,9 +306,14 @@ class Game:
                     self.dialogue.trigger('lex', LEX_DEFEAT_LINES[ev.event_type], SUPERMAN_DEFEAT_LINES[ev.event_type])
                 elif ev.event_type in METALLO_EVENT_TYPES:
                     self.dialogue.trigger('metallo', METALLO_DEFEAT_LINES[ev.event_type], SUPERMAN_VS_METALLO_DEFEAT_LINES[ev.event_type])
+            if getattr(ev, 'spawned_events', None):
+                spawned.extend(ev.spawned_events)
+                ev.spawned_events = []
             if ev.failed and not hasattr(ev, '_penalised'):
                 ev._penalised = True
-                s.reputation = max(0, s.reputation - 12)
+                # Per-event, because an event that hands you a replacement
+                # emergency on the way out has already charged you for the miss.
+                s.reputation = max(0, s.reputation - getattr(ev, 'fail_penalty', 12))
                 self.notify(f"FAILED: {ev.name}", RED)
                 self.flash.trigger(RED, 100)
                 if ev.event_type in LEX_FAIL_LINES:
@@ -315,6 +322,19 @@ class Game:
 
         # Remove finished events
         self.events = [e for e in self.events if not (e.complete or e.failed)]
+
+        # One event can lead into another: the meteor hands over a fire or a
+        # collapse at its crater. Drained *after* the filter, not before, so the
+        # slot the finishing event just freed is the one the follow-up occupies
+        # -- which is why MAX_EVENTS can never swallow it. Collected during the
+        # loop rather than appended in place, so the pass above never iterates
+        # an event that did not exist when it started.
+        for ev in spawned:
+            if len(self.events) >= self.MAX_EVENTS:
+                break
+            ev.city = self.city
+            self.events.append(ev)
+            self.notify(ev.name, CAT_COLORS[ev.category])
 
         # Krypto companion
         all_enemies = []

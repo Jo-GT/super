@@ -81,6 +81,106 @@ def cooldown_icon(surf, x, y, size, color, label, cd_ratio, key_label, cd_secs=N
 
 
 
+# ─── OFF-SCREEN EVENT MARKERS ─────────────────────────────────────────────────
+# The band markers are pinned inside. Wider at the top than the sides because a
+# marker at y=52 would span 37..67 and sit on the HP bar (to y=38) and the rep
+# bar (to y=56); at 92 it clears the whole top row, KRYPTONITE flash included.
+# The sides and bottom only need to keep the arrow tip (30px out from the
+# anchor) on screen.
+MARK_L, MARK_R = 52, SCREEN_W - 52
+MARK_T, MARK_B = 92, SCREEN_H - 52
+
+# How far past the visible area an event has to be before it earns a marker, and
+# how much further before that marker reaches full opacity. The fade is what
+# stops an event hovering on the boundary from strobing.
+VIS_MARGIN  = 40
+FADE_OVER   = 60
+
+MARK_MAX    = 4       # busiest edge stays legible; MAX_EVENTS is 7
+MARK_SURF   = 76      # scratch surface side; centre is MARK_SURF // 2
+MARK_R_DISC = 15      # contains every _draw_icon glyph (widest is +/-10px)
+
+# Furniture the band's own inset can't avoid, padded. Markers slide along their
+# edge to clear these rather than the band shrinking to miss them, which would
+# cost most of the bottom edge.
+_HUD_KEEPOUT = (
+    (444, 640, 392, 80),      # power icon row
+    (1062, 542, 218, 178),    # minimap
+)
+
+
+def _rot_pt(cx, cy, dx, dy, angle):
+    """Rotate a local offset about (cx, cy). Screen space, so y-down.
+
+    A local point on +x rotated by atan2(dy, dx) ends up pointing straight at
+    the target -- no negation, no degree conversion. The
+    `-math.degrees(angle) - 90` form used for sprites exists only because
+    pygame.transform.rotate is counter-clockwise in a y-up frame, and none of
+    that applies to points we place ourselves.
+    """
+    c, s = math.cos(angle), math.sin(angle)
+    return cx + dx * c - dy * s, cy + dx * s + dy * c
+
+
+def _edge_point(ox, oy, dx, dy):
+    """Where the ray (ox, oy) + t*(dx, dy) leaves the marker band.
+
+    Returns (x, y, edge), edge being 'v' for the left/right sides and 'h' for
+    top/bottom -- the axis a marker is free to slide along afterwards.
+
+    A ray/rect intersection rather than clamping the event's screen position per
+    axis: per-axis clamping sends everything past the bottom-right to the same
+    corner pixel whatever its bearing, so position along the edge stops carrying
+    any direction information. Here it carries all of it.
+
+    The caller guarantees a non-zero direction and an origin inside the band, so
+    a positive t always exists.
+    """
+    inf = float('inf')
+    if dx > 0:
+        tx = (MARK_R - ox) / dx
+    elif dx < 0:
+        tx = (MARK_L - ox) / dx
+    else:
+        tx = inf
+    if dy > 0:
+        ty = (MARK_B - oy) / dy
+    elif dy < 0:
+        ty = (MARK_T - oy) / dy
+    else:
+        ty = inf
+    if tx < ty:
+        # Pinned to the literal bound rather than ox + dx*tx: float drift would
+        # otherwise leave the odd marker a pixel off its own edge.
+        return (MARK_R if dx > 0 else MARK_L), oy + dy * tx, 'v'
+    return ox + dx * ty, (MARK_B if dy > 0 else MARK_T), 'h'
+
+
+def _avoid_furniture(mx, my, edge):
+    """Slide a marker along its edge until it clears the permanent HUD.
+
+    Runs twice because sliding out of the power row at the bottom-right can land
+    in the minimap; a second pass settles it. The marker's *angle* is left alone
+    -- it means "fly this way", and recomputing it from a slid anchor would make
+    two markers nudged by different amounts disagree about the same direction.
+    """
+    half = 20
+    for _ in range(2):
+        for kx, ky, kw, kh in _HUD_KEEPOUT:
+            if not (mx + half > kx and mx - half < kx + kw
+                    and my + half > ky and my - half < ky + kh):
+                continue
+            if edge == 'h':
+                left, right = kx - half, kx + kw + half
+                mx = left if abs(mx - left) <= abs(mx - right) else right
+                mx = min(max(mx, MARK_L), MARK_R)
+            else:
+                up, down = ky - half, ky + kh + half
+                my = up if abs(my - up) <= abs(my - down) else down
+                my = min(max(my, MARK_T), MARK_B)
+    return mx, my
+
+
 # ─── HUD ──────────────────────────────────────────────────────────────────────
 
 class HUD:
@@ -89,7 +189,87 @@ class HUD:
     MINIMAP_X = SCREEN_W - 210
     MINIMAP_Y = SCREEN_H - 170
 
+    def _draw_offscreen_markers(self, surface, superman, events, camera):
+        """Edge-pinned arrows toward events that are off screen.
+
+        Drawn before the rest of the HUD on purpose: _avoid_furniture is
+        best-effort geometry, so anything it fails to clear ends up *under* the
+        permanent furniture, whose positions the player has memorised.
+        """
+        candidates = []
+        for ev in events:
+            if ev.complete or ev.failed:
+                continue
+            esx = ev.x - camera.x
+            esy = ev.y - camera.y
+            # Signed distance past the visible band; <= 0 means it's on screen
+            # and its own world glyph is doing the job.
+            out = max(VIS_MARGIN - esx, esx - (SCREEN_W - VIS_MARGIN),
+                      VIS_MARGIN - esy, esy - (SCREEN_H - VIS_MARGIN))
+            if out <= 0:
+                continue
+            candidates.append((0 if ev.active else 1, ev.dist_to(superman), out, ev))
+
+        # Active events first. Once an event activates BaseEvent.draw stops
+        # drawing its ring entirely, so an active event you've flown away from
+        # has no cue left anywhere but the minimap -- its marker is the most
+        # valuable one on screen. (Several events can be active at once, hence
+        # ev.active rather than identity with the HUD's nearest-active pick.)
+        candidates.sort(key=lambda c: (c[0], c[1]))
+
+        half = MARK_SURF // 2
+        for _, dist, out, ev in candidates[:MARK_MAX]:
+            dx = ev.x - superman.x
+            dy = ev.y - superman.y
+            d = math.hypot(dx, dy)
+            if d < 1e-6:
+                continue        # unreachable while out > 0; guards the divide
+            dx /= d
+            dy /= d
+
+            # Origin is Superman, not the screen centre. The camera clamps to
+            # the world, so in a corner he sits well off-centre and the two
+            # bearings genuinely differ -- a centre-origin arrow points wrong
+            # exactly where players are most lost. Only the origin is clamped
+            # into the band; clamping the direction would reintroduce the error.
+            ox = min(max(superman.x - camera.x, MARK_L + 1), MARK_R - 1)
+            oy = min(max(superman.y - camera.y, MARK_T + 1), MARK_B - 1)
+            mx, my, edge = _edge_point(ox, oy, dx, dy)
+            mx, my = _avoid_furniture(mx, my, edge)
+
+            col = CAT_COLORS[ev.category]
+            ang = math.atan2(dy, dx)
+            m = pygame.Surface((MARK_SURF, MARK_SURF), pygame.SRCALPHA)
+
+            # Arrow first so the disc covers its base and it reads as growing
+            # out from behind the badge.
+            tri = [_rot_pt(half, half, *p, ang) for p in ((30, 0), (14, -10), (14, 10))]
+            pygame.draw.polygon(m, col, tri)
+            pygame.draw.polygon(m, BLACK, tri, 2)
+
+            # Dark fill, not a coloured one: several event icons are drawn in
+            # pale colours (FLESH, LGRAY) that vanish against their own category.
+            pygame.draw.circle(m, (0, 0, 0, 195), (half, half), MARK_R_DISC)
+            pygame.draw.circle(m, col, (half, half), MARK_R_DISC, 2)
+            if ev.active:
+                a = int(150 + 105 * abs(math.sin(pygame.time.get_ticks() * 0.004)))
+                pygame.draw.circle(m, (*WHITE, a), (half, half), MARK_R_DISC + 3, 2)
+            # Unrotated, at a fixed centre: the glyph stays upright and legible
+            # at every bearing, which is the whole reason only the triangle is
+            # rotated rather than the finished marker.
+            ev._draw_icon(m, half, half)
+
+            m.set_alpha(int(255 * min(1.0, out / FADE_OVER)))
+            surface.blit(m, (int(mx) - half, int(my) - half))
+
+            if ev.active:
+                ly = my + 26 if my < SCREEN_H // 2 else my - 26
+                draw_text(surface, f"{int(dist / PX_PER_M)}m", font_tiny, LGRAY,
+                          int(mx), int(ly), center=True)
+
     def draw(self, surface, superman, events, camera, active_event=None, krypto=None):
+        self._draw_offscreen_markers(surface, superman, events, camera)
+
         # ── Health bar ───────────────────────────────────────────────────────
         hp_ratio = superman.hp / superman.MAX_HP
         hp_col = GREEN if hp_ratio > 0.5 else (GOLD if hp_ratio > 0.25 else RED)
