@@ -144,6 +144,21 @@ def _rot(cx, cy, dx, dy, angle):
     return cx + dx * c - dy * s, cy + dx * s + dy * c
 
 
+def visible_rect(px, py):
+    """The world rect on screen while the camera follows (px, py).
+
+    Mirrors main.Camera.update: it centres on its target and then clamps to the
+    world, so near an edge the view is not centred on the player at all and a
+    plain box around him would be wrong. Events need this to know when they have
+    come into view, and events.py cannot import main.py (which imports it), so
+    the clamp is duplicated here -- tests/test_visibility.py drives a real
+    Camera and pins the two together.
+    """
+    cx = max(0, min(WORLD_W - SCREEN_W, px - SCREEN_W / 2))
+    cy = max(0, min(WORLD_H - SCREEN_H, py - SCREEN_H / 2))
+    return pygame.Rect(int(cx), int(cy), SCREEN_W, SCREEN_H)
+
+
 def draw_health_bar(surface, x, y, hp, max_hp, width=30):
     pygame.draw.rect(surface, (60, 0, 0), (x - width // 2, y, width, 5))
     ratio = max(0, hp / max_hp)
@@ -432,6 +447,23 @@ class Superman:
         a = math.atan2(dy, dx)
         diff = abs((a - self.aim_angle() + math.pi) % (2 * math.pi) - math.pi)
         return diff < 0.75
+
+    def heat_covers(self, wx, wy, threshold=28):
+        """Whether the heat beam's line passes within `threshold` of (wx, wy).
+
+        The counterpart to freeze_covers, and the same contract: it answers
+        about geometry only, so the caller gates on self.heat_firing the way
+        FireEvent gates its douse on freeze_active.
+
+        Exists because try_heat_vision applies damage in HEAT_CD ticks against
+        an enemy list. Anything that instead accumulates against the beam
+        smoothly over dt -- a charge meter rather than a health pool -- has to
+        ask per frame, and doing that from outside meant reaching into _in_beam
+        and re-deriving the endpoint. threshold is a parameter because a target
+        that visibly grows wants a hitbox that grows with it.
+        """
+        tx, ty = self.heat_beam_target()
+        return self._in_beam(wx, wy, tx, ty, threshold)
 
     def draw(self, surface, cam):
         sx = int(self.x - cam.x)

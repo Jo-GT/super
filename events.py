@@ -4,7 +4,8 @@ import random
 import os
 from constants import *
 from entities import (Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit,
-                      Civilian, BuriedCivilian, Animal, Projectile, load_game_sprite)
+                      Civilian, BuriedCivilian, Animal, Projectile, load_game_sprite,
+                      draw_health_bar, visible_rect, load_sprite_sheet)
 
 _SPRITES_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
 
@@ -60,9 +61,100 @@ def _load_fire_frames():
     return _fire_frames
 
 
+# ─── MARKER ART ───────────────────────────────────────────────────────────────
+# Portraits for the off-screen edge markers, so a marker shows the thug, the
+# mech suit or the cat rather than a category-coloured glyph. Loaded lazily and
+# once: convert_alpha needs the display up, and events are built long before the
+# HUD ever asks for one.
+
+_marker_sprites: dict = {}
+
+
+def _sheet_frame(rel_path, frame_count):
+    frames = load_sprite_sheet(rel_path, frame_count, (96, 96))
+    return frames[0] if frames else None
+
+
+def _whole_sprite(rel_path):
+    path = os.path.join(_SPRITES_ROOT, *rel_path.split("/"))
+    return pygame.image.load(path).convert_alpha()
+
+
+def _fire_marker():
+    frames = _load_fire_frames()
+    return frames[0] if frames else None
+
+
+# Anything absent here keeps its hand-drawn _draw_icon: the robot, the Brainiac
+# drone, the rubble field, the crates and the meteor have no sprite to use.
+_MARKER_ART = {
+    EventType.FIGHT_CRIMINALS:    lambda: _sheet_frame("Generic Criminal Goons/Idle_2.png", 11),
+    EventType.FIGHT_LEX_GOONS:    lambda: _whole_sprite("lexcorp/lex_goon.png"),
+    EventType.FIGHT_LEX_MECHSUIT: lambda: _whole_sprite("lexcorp/lex_mechsuit.png"),
+    EventType.FIGHT_METALLO:      lambda: _whole_sprite("Metallo/metallo.png"),
+    EventType.RESCUE_HOSTAGE:     lambda: _whole_sprite("Citizens/Hostage/hostage.png"),
+    EventType.RESCUE_CAR:         lambda: _whole_sprite("Environment/red car.png"),
+    EventType.RESCUE_FALLING:     lambda: _whole_sprite("Citizens/falling citizen.png"),
+    EventType.ANIMAL_CAT:         lambda: _whole_sprite("Animals/brown cat.png"),
+    EventType.ANIMAL_FLOOD:       lambda: _whole_sprite("Animals/brown dog.png"),
+    EventType.RESCUE_FIRE:        _fire_marker,
+}
+
+MARKER_ART_BOX = 28     # fits inside the HUD marker's r=16 disc
+
+
+def get_marker_sprite(event_type):
+    """Portrait for this event type, scaled to fit MARKER_ART_BOX, or None.
+
+    Aspect is preserved rather than squared off with load_game_sprite: the art
+    ranges from a 20x46 car to a 150x158 mech suit, and stretching either to a
+    fixed box is what makes an icon unrecognisable at this size.
+    """
+    if event_type not in _marker_sprites:
+        art = None
+        loader = _MARKER_ART.get(event_type)
+        if loader is not None:
+            try:
+                art = loader()
+            except Exception:
+                art = None          # same degrade-quietly contract as the other loaders
+        if art is not None:
+            # Crop to the art itself first. Sheet frames are square cells with
+            # the character floating in a lot of transparent padding -- the
+            # thug's 96x96 idle cell is mostly empty, and scaling the cell
+            # rather than its contents left him about eight pixels tall.
+            bounds = art.get_bounding_rect()
+            if bounds.w > 0 and bounds.h > 0:
+                art = art.subsurface(bounds).copy()
+            w, h = art.get_size()
+            s = MARKER_ART_BOX / max(w, h)
+            # round, not int: truncation left the long side a pixel under the
+            # box whenever the division landed just short of a whole number.
+            art = pygame.transform.smoothscale(
+                art, (max(1, round(w * s)), max(1, round(h * s))))
+        _marker_sprites[event_type] = art
+    return _marker_sprites[event_type]
+
+
 class BaseEvent:
-    ACTIVATION_RADIUS = 320
+    # Fallback activation range for an event that is somehow near but out of
+    # frame. It stopped being the primary trigger when events began waking on
+    # sight -- see check_activation.
     INNER_RADIUS      = 100
+
+    # Range at which the in-world beacon stops drawing, floored well above
+    # INNER_RADIUS: you have arrived once the event's own contents are around
+    # you, and a fight's enemies spawn out to 160px, so a dot keyed on the
+    # 100px activation range hung about in the middle of the brawl.
+    BEACON_R          = 260
+
+    # Assigned by Game._try_spawn_event right after construction, for the one
+    # event that needs to aim at real geometry. Not a constructor argument
+    # because EVENT_FACTORIES is an (x, y) -> BaseEvent contract, and threading
+    # a city through all fifteen factories to serve one of them is not worth
+    # it. Anything reading this must tolerate None: events are constructed bare
+    # in tests, and by other events.
+    city = None
 
     def __init__(self, x, y, event_type):
         self.x, self.y = float(x), float(y)
@@ -75,13 +167,35 @@ class BaseEvent:
         self.failed = False
         self._pulse = 0.0
         self._age = 0.0
+        # Cached in update so draw() can fade the beacon by range without
+        # needing superman passed down to it. Starts far so an event drawn
+        # before its first update still shows one.
+        self._player_dist = float('inf')
+        # Latched once you reach the area, never cleared. Not a live distance
+        # test: chasing an enemy back out past BEACON_R would pop the beacon
+        # up again behind you, in the middle of a fight you are already in.
+        self._arrived = False
         self.score_value = SCORE_TABLE[event_type]
 
     def dist_to(self, superman):
         return math.hypot(superman.x - self.x, superman.y - self.y)
 
     def check_activation(self, superman):
-        if not self.active and self.dist_to(superman) < self.INNER_RADIUS:
+        """Wake on sight, not on proximity.
+
+        Events used to sit inert until you were almost on top of them, which
+        made the world feel staged -- you flew to a marker and only then did
+        anything begin. Coming into view is the natural cue instead: what you
+        can see is happening.
+
+        INNER_RADIUS stays as a fallback for the rare case of being close but
+        out of frame (the camera clamps at the world edges, so it is reachable),
+        and it still sets the range at which the beacon fades.
+        """
+        if self.active:
+            return
+        if (self._player_dist < self.INNER_RADIUS
+                or visible_rect(superman.x, superman.y).collidepoint(self.x, self.y)):
             self.active = True
             self.on_activate(superman)
 
@@ -91,6 +205,9 @@ class BaseEvent:
     def update(self, dt, superman, particles):
         self._pulse += dt * 3.5
         self._age += dt
+        self._player_dist = self.dist_to(superman)
+        if self._player_dist <= max(self.BEACON_R, self.INNER_RADIUS):
+            self._arrived = True
         self.check_activation(superman)
 
     def draw(self, surface, cam):
@@ -99,7 +216,12 @@ class BaseEvent:
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
         color = CAT_COLORS[self.category]
-        if not self.active:
+        # Keyed on range rather than on `active`, which is what it used to be:
+        # now that events wake as soon as they are visible, an `active` test
+        # would mean the beacon never rendered at all. Range keeps the old
+        # behaviour on screen -- a pulsing marker that hands over to the event's
+        # own art as you arrive.
+        if not self._arrived:
             r = int(24 + 6 * math.sin(self._pulse))
             gs = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
             alpha = int(100 + 80 * abs(math.sin(self._pulse)))
@@ -108,6 +230,36 @@ class BaseEvent:
             pygame.draw.circle(surface, color, (sx, sy), 16)
             pygame.draw.circle(surface, WHITE, (sx, sy), 16, 2)
             self._draw_icon(surface, sx, sy)
+
+    def focus_points(self):
+        """Live pieces of the objective, in world coords.
+
+        Defaults to whatever is in self.enemies, which already covers the
+        fights, the crates, the runaway car and the meteor. Events whose
+        objective is something else override it.
+        """
+        return [(e.x, e.y) for e in getattr(self, 'enemies', ())
+                if getattr(e, 'alive', True)]
+
+    def focus_pos(self, superman):
+        """Where an off-screen marker should point: the nearest live piece of
+        the objective, falling back to the spawn point when nothing is left.
+
+        Pointing at the spawn is wrong as soon as anything moves -- a thug who
+        has chased you three blocks is the thing you actually need to find, and
+        an arrow aimed at where the fight started sends you the wrong way.
+        """
+        best, best_d = (self.x, self.y), float('inf')
+        for px, py in self.focus_points():
+            d = (px - superman.x) ** 2 + (py - superman.y) ** 2
+            if d < best_d:
+                best_d, best = d, (px, py)
+        return best
+
+    def marker_sprite(self):
+        """Art for this event's off-screen marker, or None to fall back to
+        _draw_icon. Looked up by type so one table covers every event."""
+        return get_marker_sprite(self.event_type)
 
     def _draw_icon(self, surface, sx, sy):
         pass
@@ -210,6 +362,13 @@ class HostageEvent(BaseEvent):
             e.draw(surface, cam)
         if self.hostage:
             self.hostage.draw(surface, cam)
+
+    def focus_points(self):
+        # The thugs while they stand; the hostage herself once they are down.
+        pts = super().focus_points()
+        if not pts and self.hostage and not self.hostage.saved:
+            pts = [(self.hostage.x, self.hostage.y)]
+        return pts
 
     def _draw_icon(self, surface, sx, sy):
         pygame.draw.circle(surface, (220, 180, 130), (sx, sy - 2), 5)
@@ -315,6 +474,11 @@ class FireEvent(BaseEvent):
             pygame.draw.rect(surface, col, (sx - 40, sy - 90, int(80 * ratio), 8))
         super().draw(surface, cam)
 
+    def focus_points(self):
+        # Flames while any burn, then the citizens still to be carried out.
+        pts = [f for f, hp in zip(self.flames, self.flame_hp) if hp > 0]
+        return pts or [(c.x, c.y) for c in self.citizens if not c.saved]
+
     def _draw_icon(self, surface, sx, sy):
         # Flame
         pygame.draw.polygon(surface, FIRE_HOT, [(sx, sy - 8), (sx - 5, sy + 5), (sx + 5, sy + 5)])
@@ -325,7 +489,13 @@ class FireEvent(BaseEvent):
 
 class FallingEvent(BaseEvent):
     INNER_RADIUS = 350
-    FALL_SPEED = 220.0
+    # Slowed from 220 when events began waking on sight. The fall is the only
+    # deadline in the game short enough for that to matter: 340px at 220px/s is
+    # 1.55s, and the far corner of the screen is 734px away against a 550px/s
+    # cruise, so catching someone who appeared at the edge was a coin toss. At
+    # 175 the same drop allows ~1070px of travel and stays winnable without
+    # super speed.
+    FALL_SPEED = 175.0
 
     def __init__(self, x, y):
         super().__init__(x, y, EventType.RESCUE_FALLING)
@@ -383,6 +553,9 @@ class FallingEvent(BaseEvent):
         pygame.draw.rect(surface, (80, 0, 0), (sx - 20, bar_y, 40, 5))
         pygame.draw.rect(surface, RED, (sx - 20, bar_y, int(40 * progress), 5))
 
+    def focus_points(self):
+        return [(self.person_x, self.person_y)]
+
     def _draw_icon(self, surface, sx, sy):
         pygame.draw.circle(surface, FLESH, (sx, sy - 4), 5)
         pygame.draw.line(surface, FLESH, (sx, sy + 1), (sx, sy + 8), 2)
@@ -428,10 +601,15 @@ class CarEvent(BaseEvent):
         self._traveled = 0.0
         self.car = Car(self.car_x, self.car_y)
         self.enemies = [self.car]
-        # Pedestrians in the path
+        # Pedestrians in the path. Moved further down the road (from 150-300)
+        # when events began waking on sight: the car now pulls away while you
+        # are still up to 734px off, and at 200px/s the old spacing gave 0.6s to
+        # intercept, which no amount of flying covers. At 420-660 the nearest is
+        # ~2s out -- still urgent, and still well inside the 900px the car is
+        # allowed to travel before the event is lost anyway.
         self.pedestrians = [
-            Civilian(x + math.cos(angle) * random.uniform(150, 300) + random.uniform(-30, 30),
-                     y + math.sin(angle) * random.uniform(150, 300) + random.uniform(-30, 30))
+            Civilian(x + math.cos(angle) * random.uniform(420, 660) + random.uniform(-30, 30),
+                     y + math.sin(angle) * random.uniform(420, 660) + random.uniform(-30, 30))
             for _ in range(3)
         ]
 
@@ -519,6 +697,13 @@ def _rot_pt(cx, cy, dx, dy, angle):
     return cx + dx * c - dy * s, cy + dx * s + dy * c
 
 
+def _lerp_col(a, b, t):
+    t = max(0.0, min(1.0, t))
+    return (int(a[0] + (b[0] - a[0]) * t),
+            int(a[1] + (b[1] - a[1]) * t),
+            int(a[2] + (b[2] - a[2]) * t))
+
+
 # ─── CAT IN TREE ──────────────────────────────────────────────────────────────
 
 class CatEvent(BaseEvent):
@@ -528,9 +713,17 @@ class CatEvent(BaseEvent):
         super().__init__(x, y, EventType.ANIMAL_CAT)
         self.cat = Animal(x, y - 40, 'cat')
 
-    def on_activate(self, superman):
-        self.cat.saved = True
-        self.complete = True
+    # The rescue is arrival, and it used to ride on on_activate because
+    # activation *was* arrival -- INNER_RADIUS was 80. Once events began waking
+    # on sight that shortcut handed you the cat from across the street, so the
+    # reach is now its own check.
+    RESCUE_R = 80
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if not self.complete and self._player_dist < self.RESCUE_R:
+            self.cat.saved = True
+            self.complete = True
 
     def draw(self, surface, cam):
         if self.complete:
@@ -547,6 +740,9 @@ class CatEvent(BaseEvent):
             pygame.draw.circle(surface, (28, 75, 28), (sx, sy - 20), 32, 2)
         self.cat.draw(surface, cam)
         super().draw(surface, cam)
+
+    def focus_points(self):
+        return [(self.cat.x, self.cat.y)]
 
     def _draw_icon(self, surface, sx, sy):
         # Paw print
@@ -601,6 +797,9 @@ class FloodEvent(BaseEvent):
             remaining = sum(1 for a in self.animals if not a.saved)
             if remaining > 0:
                 self.failed = True
+
+    def focus_points(self):
+        return [(a.x, a.y) for a in self.animals if not a.saved]
 
     def draw(self, surface, cam):
         if self.complete or self.failed:
@@ -946,6 +1145,418 @@ class CrateEvent(BaseEvent):
         pygame.draw.line(surface, XRAY_C, (sx - 10, sy), (sx + 10, sy), 2)
 
 
+# ─── METEOR STRIKE ────────────────────────────────────────────────────────────
+
+class Meteor:
+    """The falling rock's damage interface.
+
+    Quacks like an Enemy -- {x, y, alive, take_damage, freeze} -- so punch and
+    heat vision hit it and freeze breath registers with no special-casing, the
+    same trick Car and Crate use. Its x/y are rewritten every frame to the
+    meteor's *drawn* sky position rather than its ground target: that is what
+    makes try_punch's teleport read as flying up to intercept, and what keeps
+    the 180px freeze cone honest -- you have to go up to the rock to chill it.
+
+    freeze() does not lock it in place the way Enemy.freeze does; MeteorEvent
+    reads self.frozen as a descent multiplier instead.
+
+    HP is tuned against two clocks at once. A punch is 55 on a 1.8s cooldown,
+    so 220 is four punches / 5.4s. Heat vision is 22dps and *also* lands on this
+    HP pool, so a pure-beam run would kill it by HP in 10s -- comfortably slower
+    than the 6s overload, which is what keeps the heat bar the real heat-vision
+    win rather than a decoration. Move HP and HEAT_RATE together or that breaks.
+    """
+    HP = 220
+    # The whole event is the player's fight, and a dog cannot bite a rock in the sky
+    minion_auto_attack = False
+
+    def __init__(self, x, y):
+        self.x, self.y = float(x), float(y)
+        self.hp = self.HP
+        self.alive = True
+        self.frozen = 0.0
+
+    def take_damage(self, amount):
+        self.hp -= amount
+        if self.hp <= 0:
+            self.hp = 0
+            self.alive = False
+
+    def freeze(self, duration):
+        self.frozen = max(self.frozen, duration)
+
+
+class MeteorEvent(BaseEvent):
+    INNER_RADIUS = 350        # only the beacon's fade range now; the meteor
+                              # wakes as soon as it is on screen
+
+    DESCENT_TIME = 15.0       # 390px of fall at 26px/s. Still leaves room for
+                              # either kill: the overload needs 6s of held beam
+                              # and a committed punch run lands in about 6s.
+    FROZEN_MUL   = 0.25       # the same slow Enemy._move_toward applies. Never
+                              # 0: freeze has to buy time, not stall the event
+                              # forever, and alt must stay monotonic so this
+                              # always terminates once the player lets go.
+    ALTITUDE_PX  = 390        # screen offset above the target at alt = 1
+    ENTRY_DX     = 300        # lateral offset at alt = 1; sign randomised, so
+                              # it comes in on a slant instead of dropping.
+                              # Scaled with ALTITUDE_PX so the approach keeps
+                              # the same angle, just a longer run at it.
+    R_HIGH, R_LOW = 30, 92    # drawn radius at alt 1 and at impact. The
+                              # shadow, reticle, trail and bars are all sized
+                              # off these rather than fixed pixels, so rescaling
+                              # the rock rescales everything that hangs off it.
+    HEAT_RATE    = 1 / 6.0    # 6s of held, on-target beam to overload
+    HEAT_DECAY   = 0.05       # 20s to cool from full. Crate.char never decays
+                              # because it is a warning; this is a win
+                              # condition, so a lapse has to cost something --
+                              # but slowly, or repositioning wipes the run.
+    TRAIL_HZ     = 20         # emissions/sec. A per-frame emit at 60fps with
+                              # ~0.8s lives holds 150+ live particles for the
+                              # whole descent; this holds ~56.
+    TARGET_SEARCH_R = 200     # a spawn point is never inside a building, so the
+                              # nearest is normally 100-150px off. Past this
+                              # (deep in a park) it lands in the street instead.
+
+    ROCK = (74, 66, 60)
+
+    # Softened from main.py's standard 12: the crater leaves a live fire or
+    # collapse behind, so the miss already costs you a second emergency.
+    fail_penalty = 6
+
+    def __init__(self, x, y):
+        super().__init__(x, y, EventType.FIGHT_METEOR)
+        self.alt = 1.0
+        self.heat = 0.0
+        self.core = None          # built on activation, see on_activate
+        self.enemies = []         # ditto -- empty until then
+        self.target_x, self.target_y = float(x), float(y)
+        self.entry_dx = random.choice((-1, 1)) * self.ENTRY_DX
+        self._travel_ang = math.atan2(self.ALTITUDE_PX, -self.entry_dx)
+        self._hit_building = False
+        self._trail_t = 0.0
+        self._resolved = False
+        self._aura_key = None     # see _draw_rock
+        self._aura = None
+        # Fixed crater offsets in unit-radius space, generated once so the
+        # surface detail doesn't crawl the way random() in a draw path always
+        # does.
+        self._craters = [(random.uniform(-0.5, 0.5), random.uniform(-0.5, 0.5),
+                          random.uniform(0.14, 0.30)) for _ in range(4)]
+        # Drained by main.py's event loop, after the finished-event filter runs.
+        self.spawned_events = []
+
+    # ── target ────────────────────────────────────────────────────────────────
+
+    def _pick_target(self):
+        """Aim at the nearest building centre, if the city gave us one.
+
+        A linear pass over ~1200 Building rects, once per event, on squared
+        distance. city.py has no spatial index and one meteor doesn't justify
+        building one.
+        """
+        if not self.city:
+            return
+        best, best_d = None, float(self.TARGET_SEARCH_R ** 2)
+        for b in self.city.buildings:
+            dx = b.rect.centerx - self.x
+            dy = b.rect.centery - self.y
+            d = dx * dx + dy * dy
+            if d < best_d:
+                best_d, best = d, b
+        if best is not None:
+            self.target_x = float(best.rect.centerx)
+            self.target_y = float(best.rect.centery)
+            self._hit_building = True
+
+    def on_activate(self, superman):
+        # Both of these happen here rather than in __init__. self.city is only
+        # assigned after construction, so the building can't be chosen earlier.
+        # And the core must not exist before the event is live: heat vision
+        # reaches 520px and punch teleports from 450px, both further than the
+        # 350px it takes to activate, so a core built in __init__ could be
+        # destroyed -- and scored -- from outside the event entirely.
+        self._pick_target()
+        mx, my = self._pos()
+        self.core = Meteor(mx, my)
+        self.enemies.append(self.core)
+
+    # ── geometry ──────────────────────────────────────────────────────────────
+
+    def _pos(self):
+        """World position of the rock. alt 1 = high and offset, 0 = on target."""
+        return (self.target_x + self.entry_dx * self.alt,
+                self.target_y - self.ALTITUDE_PX * self.alt)
+
+    def _radius(self):
+        return self.R_HIGH + (self.R_LOW - self.R_HIGH) * (1.0 - self.alt)
+
+    # ── update ────────────────────────────────────────────────────────────────
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if self._resolved or not self.active:
+            return
+
+        mx, my = self._pos()
+        self.core.x, self.core.y = mx, my
+
+        # Freeze is a descent multiplier, not a lock. FREEZE_LOCK is 0.35s
+        # against a 0.12s recast, so a held cone keeps this topped up and it
+        # lapses a third of a second after release.
+        if self.core.frozen > 0:
+            self.core.frozen -= dt
+        speed_mul = self.FROZEN_MUL if self.core.frozen > 0 else 1.0
+        self.alt = max(0.0, self.alt - (speed_mul / self.DESCENT_TIME) * dt)
+
+        # Heat accumulates off the beam's geometry rather than off take_damage,
+        # so it climbs smoothly instead of arriving in 12.5Hz steps. The hitbox
+        # is the drawn radius, so a rock that has visibly doubled in size is
+        # correspondingly easier to keep the beam on.
+        if superman.heat_firing and superman.heat_covers(mx, my, max(28, self._radius())):
+            self.heat = min(1.0, self.heat + self.HEAT_RATE * dt)
+            if random.random() < 0.5:
+                particles.burst(mx, my, FIRE_WARM, count=2, speed=2.2, size=4, life=0.3)
+        else:
+            self.heat = max(0.0, self.heat - self.HEAT_DECAY * dt)
+
+        self._emit_trail(dt, particles, mx, my)
+
+        # One resolution point, if/elif. main.py checks complete and failed with
+        # two independent ifs, so setting both in a frame pays out and penalises.
+        if not self.core.alive or self.heat >= 1.0:
+            self._destroy(particles, mx, my)
+        elif self.alt <= 0.0:
+            self._impact(particles)
+
+    def _emit_trail(self, dt, particles, mx, my):
+        """A wake as wide as the rock, shed from its trailing face.
+
+        Everything used to be emitted from the centre point. Particles draw
+        after events (main.py:360-364), so the whole trail rendered *on top of*
+        the rock as a knot of sparks in its middle -- fine when it was 46px
+        across, absurd at 184. Emission now starts behind the trailing edge and
+        is spread across the rock's own width, so the tail reads as coming off
+        the thing rather than out of it.
+        """
+        step = 1.0 / self.TRAIL_HZ
+        self._trail_t += dt
+        r = self._radius()
+        back = self._travel_ang + math.pi
+        bx, by = math.cos(back), math.sin(back)
+        px, py = -by, bx                      # across the direction of travel
+        sz = max(5, r * 0.13)
+
+        while self._trail_t >= step:
+            self._trail_t -= step
+            for _ in range(3):
+                # triangular, so the plume is densest along the centre line and
+                # thins towards the edges instead of sitting in two rails.
+                u = r * 0.88 * random.triangular(-1, 1, 0)
+                ex = mx + bx * r * 0.70 + px * u
+                ey = my + by * r * 0.70 + py * u
+                hot = random.random() < 0.55
+                particles.trail(ex, ey, FIRE_HOT if hot else FIRE_WARM,
+                                self._travel_ang, spread=0.30, count=1, speed=2.4,
+                                life=random.uniform(0.5, 0.9),
+                                size=int(sz * random.uniform(0.7, 1.2)))
+            # Smoke sheds from further back and hangs around longer, so the tail
+            # fades grey rather than simply stopping.
+            u = r * 0.85 * random.triangular(-1, 1, 0)
+            particles.trail(mx + bx * r * 1.05 + px * u, my + by * r * 1.05 + py * u,
+                            GRAY, self._travel_ang, spread=0.55, count=1, speed=1.0,
+                            life=random.uniform(1.0, 1.6), size=int(sz * 1.35))
+            # Dripping embers. burst() is the only emitter taking gravity, and
+            # at count=1 a random-direction spark with fall on it is exactly
+            # what a shedding ember is -- no need to build Particle by hand.
+            if random.random() < 0.55:
+                # Off the trailing edge like everything else. Emitted from the
+                # centre they landed on the rock's own face, which -- particles
+                # drawing over events -- looked like yellow spots painted on it.
+                u = r * 0.7 * random.triangular(-1, 1, 0)
+                particles.burst(mx + bx * r * 0.85 + px * u,
+                                my + by * r * 0.85 + py * u, FIRE_WARM, count=1,
+                                speed=1.2, size=int(sz * 0.8), life=0.9, gravity=0.14)
+            if self.core.frozen > 0 and random.random() < 0.5:
+                u = r * 0.8 * random.triangular(-1, 1, 0)
+                particles.burst(mx + bx * r * 0.7 + px * u, my + by * r * 0.7 + py * u,
+                                ICE, count=2, speed=1.6, size=int(sz * 0.6), life=0.4)
+
+    def _destroy(self, particles, mx, my):
+        self._resolved = True
+        # ~112 particles in one frame, roughly 3x a sonic_boom, once, on an
+        # event that is removed the same frame. Budgeted, not free.
+        particles.sonic_boom(mx, my, FIRE_HOT)
+        particles.burst(mx, my, WHITE,     count=14, speed=8.0, size=7, life=0.30)
+        particles.burst(mx, my, FIRE_WARM, count=26, speed=6.5, size=7, life=0.85, gravity=0.05)
+        particles.burst(mx, my, FIRE_HOT,  count=24, speed=5.0, size=6, life=1.10, gravity=0.07)
+        particles.burst(mx, my, GRAY,      count=20, speed=4.0, size=5, life=1.30, gravity=0.10)
+        particles.burst(mx, my, DARKRED,   count=10, speed=3.0, size=8, life=1.40, gravity=0.12)
+        self.complete = True
+
+    def _impact(self, particles):
+        self._resolved = True
+        tx, ty = self.target_x, self.target_y
+        particles.sonic_boom(tx, ty, FIRE_HOT)
+        particles.sonic_boom(tx, ty, GRAY)
+        particles.shockwave(tx, ty)
+        particles.burst(tx, ty, WHITE,     count=18, speed=9.0, size=8,  life=0.30)
+        particles.burst(tx, ty, FIRE_WARM, count=26, speed=7.0, size=9,  life=0.90, gravity=0.04)
+        particles.burst(tx, ty, FIRE_HOT,  count=22, speed=5.5, size=8,  life=1.20, gravity=0.06)
+        particles.burst(tx, ty, GRAY,      count=28, speed=4.0, size=7,  life=1.60, gravity=0.09)
+        particles.burst(tx, ty, DARK_GRAY, count=18, speed=2.5, size=10, life=2.00, gravity=0.03)
+
+        # One event leads into another. A rock through a roof can bring the
+        # building down or set it alight; one that found no building to aim at
+        # just burns. Handed to main.py rather than appended anywhere here -- an
+        # event has no reference to the event list and should not acquire one.
+        follow = RubbleEvent if (self._hit_building and random.random() < 0.5) else FireEvent
+        self.spawned_events.append(follow(tx, ty))
+        self.failed = True
+
+    def get_ui_text(self):
+        if self.core is None:
+            return self.name, self.hint
+        integ = int(100 * self.core.hp / Meteor.HP)
+        return self.name, (f"Integrity {integ}%   Core {int(self.heat * 100)}%   -   "
+                           f"Q=Punch  SPACE=Heat Vision  F=Freeze slows it")
+
+    # ── draw ──────────────────────────────────────────────────────────────────
+
+    def draw(self, surface, cam):
+        if self.complete or self.failed:
+            return
+        super().draw(surface, cam)     # dormant marker, only while inactive
+        if not self.active:
+            return
+
+        tsx = int(self.target_x - cam.x)
+        tsy = int(self.target_y - cam.y)
+        mx, my = self._pos()
+        msx = int(mx - cam.x)
+        msy = int(my - cam.y)
+
+        # The heaviest event draw in the game (two per-frame SRCALPHA surfaces),
+        # and the main loop never culls events -- an active meteor is unattended
+        # for most of its life once the player flies off. So cull here.
+        if not (-260 < msx < SCREEN_W + 260 and -520 < msy < SCREEN_H + 260):
+            return
+
+        prog = 1.0 - self.alt
+        r = int(self._radius())
+
+        # Ground shadow. This is the cue that makes the vertical offset read as
+        # altitude rather than as distance north; without it the illusion fails.
+        sw = int(self.R_LOW * (0.34 + 0.66 * prog))
+        sh = max(3, int(sw * 0.42))
+        shadow = pygame.Surface((sw * 2, sh * 2), pygame.SRCALPHA)
+        # Opaque enough to read against the darker building colours, which most
+        # targets sit on -- at the original alpha it vanished on exactly the
+        # rooftops it matters most on.
+        pygame.draw.ellipse(shadow, (0, 0, 0, int(70 + 150 * prog)), shadow.get_rect())
+        surface.blit(shadow, (tsx - sw, tsy - sh))
+
+        # Contracting reticle, for time pressure. Sized off R_LOW so it always
+        # frames the footprint the rock will actually cover, rather than a fixed
+        # radius the rock long ago outgrew.
+        ring = int(self.R_LOW * (1.9 - 0.85 * prog) + 7 * math.sin(self._pulse * 2))
+        col = RED if prog > 0.66 else (ORANGE if prog > 0.33 else GOLD)
+        pygame.draw.circle(surface, col, (tsx, tsy), ring, 2)
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            pygame.draw.line(surface, col,
+                             (tsx + dx * (ring - 9), tsy + dy * (ring - 9)),
+                             (tsx + dx * (ring + 9), tsy + dy * (ring + 9)), 2)
+
+        # Three dashes binding rock to shadow, so the eye reads them as one object
+        for i in (0.30, 0.52, 0.74):
+            ax = msx + (tsx - msx) * i
+            ay = msy + (tsy - msy) * i
+            bx = msx + (tsx - msx) * (i + 0.07)
+            by = msy + (tsy - msy) * (i + 0.07)
+            pygame.draw.line(surface, (176, 108, 62),
+                             (int(ax), int(ay)), (int(bx), int(by)), 3)
+
+        self._draw_rock(surface, msx, msy, r)
+
+        bw = max(64, int(r * 1.3))                # kept in proportion to the rock
+        draw_health_bar(surface, msx, msy - r - 26, self.core.hp, Meteor.HP, width=bw)
+        # Not draw_health_bar: its green->gold->red ramp runs the wrong way for
+        # a meter that is dangerous when full.
+        pygame.draw.rect(surface, (38, 12, 0), (msx - bw // 2, msy - r - 16, bw, 6))
+        if self.heat > 0:
+            hc = (_lerp_col(FIRE_WARM, FIRE_HOT, self.heat * 2) if self.heat < 0.5
+                  else _lerp_col(FIRE_HOT, WHITE, (self.heat - 0.5) * 2))
+            pygame.draw.rect(surface, hc,
+                             (msx - bw // 2, msy - r - 16, int(bw * self.heat), 6))
+
+        # Descent bar, on the ground, in the standard event timer idiom. Pushed
+        # clear of the reticle rather than sitting at a fixed +40, which the
+        # rock now swallows whole.
+        by = tsy + int(self.R_LOW * 1.35)
+        bc = GREEN if self.alt > 0.5 else (GOLD if self.alt > 0.25 else RED)
+        pygame.draw.rect(surface, (40, 20, 0), (tsx - 40, by, 80, 8))
+        pygame.draw.rect(surface, bc, (tsx - 40, by, int(80 * self.alt), 8))
+
+    def _draw_rock(self, surface, msx, msy, r):
+        # Heat aura: the Crate.char glow idiom in circular form, but cached.
+        # At R_LOW it spans ~830px, and building that from two alpha circles
+        # every frame is the one thing in this event that genuinely costs
+        # frames in wasm. Radius is quantised to 8px and heat to 10 steps, so
+        # the pulse and the descent both reuse a surface for many frames at a
+        # time and it is only rebuilt when it would visibly differ.
+        # Three concentric bands rather than one big wash. A single circle at
+        # 1.85r and low alpha spread the same light over four times the area and
+        # read as a smudge over the city instead of as something around the
+        # rock; stacking a bright rim that hugs the surface under a wider, much
+        # fainter halo is what makes it look lit rather than tinted.
+        ar = int(r * 1.70 + 3 * math.sin(self._pulse * 2))
+        key = (ar // 8, int(self.heat * 10))
+        if key != self._aura_key:
+            self._aura_key = key
+            h = self.heat
+            aura = pygame.Surface((ar * 2, ar * 2), pygame.SRCALPHA)
+            for frac, col, base, gain in (
+                    (1.00, FIRE_HOT,  26,  80),     # outer halo
+                    (0.76, FIRE_HOT,  60, 110),     # body of the glow
+                    (0.63, FIRE_WARM, 95, 150)):    # rim, tight to the surface
+                pygame.draw.circle(aura, (*col, min(255, int(base + gain * h))),
+                                   (ar, ar), int(ar * frac))
+            self._aura = aura
+        a = self._aura
+        surface.blit(a, (msx - a.get_width() // 2, msy - a.get_height() // 2))
+
+        # Red for most of the climb, only going pale in the last third. Ramping
+        # to white by halfway made it read as bleached rather than glowing,
+        # which is the opposite of the cue the meter is trying to sell.
+        body = (_lerp_col(self.ROCK, FIRE_HOT, self.heat / 0.65) if self.heat < 0.65
+                else _lerp_col(FIRE_HOT, (255, 214, 150), (self.heat - 0.65) / 0.35))
+        if self.core.frozen > 0:
+            body = _lerp_col(body, ICE, 0.45)
+        pygame.draw.circle(surface, body, (msx, msy), r)
+        # An ember rim, not the old flat dark outline. Something falling this
+        # fast is burning on the way down whether or not anyone has shot it, and
+        # at heat 0 a plain grey disc read as a boulder someone had dropped.
+        # Heat still owns the *body* colour, so the gameplay signal is intact.
+        rim = _lerp_col((176, 74, 24), (255, 240, 210), self.heat)
+        if self.core.frozen > 0:
+            rim = _lerp_col(rim, ICE, 0.6)
+        pygame.draw.circle(surface, rim, (msx, msy), r, max(2, int(r * 0.055)))
+        for cx, cy, cr in self._craters:
+            pygame.draw.circle(surface, _lerp_col(body, (16, 12, 10), 0.45),
+                               (msx + int(cx * r), msy + int(cy * r)),
+                               max(2, int(cr * r)))
+        if self.core.frozen > 0:
+            pygame.draw.circle(surface, ICE, (msx, msy), r + 3, 2)
+
+    def _draw_icon(self, surface, sx, sy):
+        # Stays within +/-12px of (sx, sy) and touches no instance state: the
+        # off-screen HUD marker calls this too.
+        pygame.draw.circle(surface, (92, 78, 70), (sx + 3, sy + 3), 6)
+        pygame.draw.circle(surface, FIRE_HOT, (sx + 3, sy + 3), 6, 2)
+        pygame.draw.line(surface, FIRE_WARM, (sx - 10, sy - 10), (sx - 2, sy - 2), 2)
+        pygame.draw.line(surface, FIRE_HOT,  (sx - 6,  sy - 12), (sx - 1, sy - 6), 2)
+
+
 # ─── FACTORY ──────────────────────────────────────────────────────────────────
 
 EVENT_FACTORIES = {
@@ -963,6 +1574,7 @@ EVENT_FACTORIES = {
     EventType.ANIMAL_FLOOD:    FloodEvent,
     EventType.RESCUE_RUBBLE:   RubbleEvent,
     EventType.FIGHT_LEX_CRATES: CrateEvent,
+    EventType.FIGHT_METEOR:     MeteorEvent,
 }
 
 

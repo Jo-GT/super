@@ -6,6 +6,11 @@ TITLE  = "Superman: Guardian of Metropolis"
 WORLD_W = 4608
 WORLD_H = 4608
 
+# Only used to put a human-readable number on the off-screen event markers.
+# 4 px/m makes the world 1152m across -- a plausible downtown, and it keeps
+# typical readings to three digits.
+PX_PER_M = 4
+
 SKY       = (65, 110, 185)
 ROAD      = (36, 38, 44)
 ROAD_MRK  = (195, 172, 48)
@@ -63,6 +68,7 @@ class EventType(Enum):
     FIGHT_LEX_MECHSUIT = auto()
     RESCUE_RUBBLE      = auto()
     FIGHT_LEX_CRATES   = auto()
+    FIGHT_METEOR       = auto()
 
 EVENT_CAT = {
     EventType.FIGHT_CRIMINALS: 'fight',
@@ -79,6 +85,7 @@ EVENT_CAT = {
     EventType.FIGHT_LEX_MECHSUIT: 'fight',
     EventType.RESCUE_RUBBLE:      'rescue',
     EventType.FIGHT_LEX_CRATES:   'fight',
+    EventType.FIGHT_METEOR:       'fight',
 }
 
 EVENT_NAMES = {
@@ -96,6 +103,7 @@ EVENT_NAMES = {
     EventType.FIGHT_LEX_MECHSUIT: "!! LEX MECH SUIT ONLINE !!",
     EventType.RESCUE_RUBBLE:      "Collapsed Building!",
     EventType.FIGHT_LEX_CRATES:   "LexCorp Decoy Crates",
+    EventType.FIGHT_METEOR:       "!! METEOR INBOUND !!",
 }
 
 EVENT_HINTS = {
@@ -113,6 +121,7 @@ EVENT_HINTS = {
     EventType.FIGHT_LEX_MECHSUIT: "Dodge the missile barrage! Use Q=Punch!",
     EventType.RESCUE_RUBBLE:      "X=X-Ray Vision to find the buried, then fly to each survivor!",
     EventType.FIGHT_LEX_CRATES:   "X=X-Ray to scan, then Q=Punch the bomb. Heat vision cuts straight through!",
+    EventType.FIGHT_METEOR:       "Q=Punch to crack it  -  SPACE=Heat Vision to overload it  -  F=Freeze slows the fall",
 }
 
 CAT_COLORS = {
@@ -136,6 +145,7 @@ SCORE_TABLE = {
     EventType.FIGHT_LEX_MECHSUIT: 3200,
     EventType.RESCUE_RUBBLE:      1100,
     EventType.FIGHT_LEX_CRATES:   1400,
+    EventType.FIGHT_METEOR:       2000,
 }
 
 LEX_EVENT_TYPES = {
