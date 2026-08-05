@@ -98,7 +98,7 @@ FADE_OVER   = 60
 
 MARK_MAX    = 4       # busiest edge stays legible; MAX_EVENTS is 7
 MARK_SURF   = 76      # scratch surface side; centre is MARK_SURF // 2
-MARK_R_DISC = 15      # contains every _draw_icon glyph (widest is +/-10px)
+MARK_R_DISC = 16      # contains every _draw_icon glyph (widest is +/-10px)
 
 # Furniture the band's own inset can't avoid, padded. Markers slide along their
 # edge to clear these rather than the band shrinking to miss them, which would
@@ -247,17 +247,26 @@ class HUD:
             pygame.draw.polygon(m, col, tri)
             pygame.draw.polygon(m, BLACK, tri, 2)
 
-            # Dark fill, not a coloured one: several event icons are drawn in
-            # pale colours (FLESH, LGRAY) that vanish against their own category.
-            pygame.draw.circle(m, (0, 0, 0, 195), (half, half), MARK_R_DISC)
+            # A dark slate rather than the category colour, which pale glyphs
+            # (FLESH, LGRAY) would disappear into -- but not near-black either,
+            # or the sprite portraits, most of which are dark silhouettes, read
+            # as a smudge.
+            pygame.draw.circle(m, (46, 50, 60, 210), (half, half), MARK_R_DISC)
             pygame.draw.circle(m, col, (half, half), MARK_R_DISC, 2)
             if ev.active:
                 a = int(150 + 105 * abs(math.sin(pygame.time.get_ticks() * 0.004)))
                 pygame.draw.circle(m, (*WHITE, a), (half, half), MARK_R_DISC + 3, 2)
-            # Unrotated, at a fixed centre: the glyph stays upright and legible
-            # at every bearing, which is the whole reason only the triangle is
-            # rotated rather than the finished marker.
-            ev._draw_icon(m, half, half)
+            # Unrotated, at a fixed centre: the art stays upright and legible at
+            # every bearing, which is the whole reason only the triangle is
+            # rotated rather than the finished marker. Prefer the event's own
+            # sprite -- a thug, the mech suit, the cat -- so the marker says
+            # what you are flying to, not merely which category it falls in.
+            # _draw_icon is the fallback for the events with no art of their own.
+            art = ev.marker_sprite() if hasattr(ev, 'marker_sprite') else None
+            if art is not None:
+                m.blit(art, art.get_rect(center=(half, half)))
+            else:
+                ev._draw_icon(m, half, half)
 
             m.set_alpha(int(255 * min(1.0, out / FADE_OVER)))
             surface.blit(m, (int(mx) - half, int(my) - half))
@@ -383,16 +392,9 @@ class HUD:
         surface.blit(mm_surf, (self.MINIMAP_X, self.MINIMAP_Y))
         draw_text(surface, "MAP", font_tiny, LGRAY, self.MINIMAP_X + 4, self.MINIMAP_Y + 2, shadow=False)
 
-        # ── Nearby event prompt ───────────────────────────────────────────────
-        for ev in events:
-            if ev.complete or ev.failed or ev.active:
-                continue
-            d = ev.dist_to(superman)
-            if d < ev.ACTIVATION_RADIUS:
-                alpha = int(255 * (1 - d / ev.ACTIVATION_RADIUS))
-                col = CAT_COLORS[ev.category]
-                msg = f"Fly into event area to respond: {ev.name}"
-                draw_text(surface, msg, font_small, (*col[:3], alpha), SCREEN_W // 2, SCREEN_H - 155, center=True)
-                break
+        # The "Fly into event area to respond" prompt lived here. Events now
+        # wake as soon as they are on screen, so anything close enough to
+        # prompt about is already running and the line could never render --
+        # along with BaseEvent.ACTIVATION_RADIUS, which existed only to feed it.
 
 

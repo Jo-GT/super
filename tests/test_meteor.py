@@ -184,10 +184,13 @@ def test_overload_beats_the_beams_own_hp_damage():
     assert overload_route < hp_route
 
 
-def test_prompt_radius_exceeds_activation_radius():
-    """Otherwise the 'fly into event area' prompt could never fire -- the event
-    would already be live before the player reached the prompt's range."""
-    assert MeteorEvent.ACTIVATION_RADIUS > MeteorEvent.INNER_RADIUS
+def test_meteor_wakes_on_sight_not_on_proximity():
+    """It must be engageable from across the screen: at 350px the descent would
+    already be well under way before you could see what you were aiming at."""
+    ev = MeteorEvent(2400.0, 2000.0)
+    sup = _Sup(2000.0, 2000.0)            # 400px away, well outside INNER_RADIUS
+    ev.update(DT, sup, ParticleSystem())
+    assert ev.active and ev.core is not None
 
 
 # ─── end to end, through a real Game ──────────────────────────────────────────

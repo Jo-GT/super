@@ -144,6 +144,21 @@ def _rot(cx, cy, dx, dy, angle):
     return cx + dx * c - dy * s, cy + dx * s + dy * c
 
 
+def visible_rect(px, py):
+    """The world rect on screen while the camera follows (px, py).
+
+    Mirrors main.Camera.update: it centres on its target and then clamps to the
+    world, so near an edge the view is not centred on the player at all and a
+    plain box around him would be wrong. Events need this to know when they have
+    come into view, and events.py cannot import main.py (which imports it), so
+    the clamp is duplicated here -- tests/test_visibility.py drives a real
+    Camera and pins the two together.
+    """
+    cx = max(0, min(WORLD_W - SCREEN_W, px - SCREEN_W / 2))
+    cy = max(0, min(WORLD_H - SCREEN_H, py - SCREEN_H / 2))
+    return pygame.Rect(int(cx), int(cy), SCREEN_W, SCREEN_H)
+
+
 def draw_health_bar(surface, x, y, hp, max_hp, width=30):
     pygame.draw.rect(surface, (60, 0, 0), (x - width // 2, y, width, 5))
     ratio = max(0, hp / max_hp)

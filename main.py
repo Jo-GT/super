@@ -135,7 +135,12 @@ def draw_xray_wash(surface, phase):
 class Game:
     MAX_EVENTS   = 7
     SPAWN_TIMER  = 9.0
-    MIN_SPAWN_D  = 500
+    # Beyond the 734px half-diagonal of the viewport, so a new event is always
+    # out of frame when it appears. It matters now that events wake on sight:
+    # at the old 500 they could spawn already visible and snap straight to
+    # active, materialising enemies in front of you instead of being something
+    # you fly up on.
+    MIN_SPAWN_D  = 850
 
     def __init__(self):
         self.city   = City(seed=42)

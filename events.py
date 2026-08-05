@@ -5,7 +5,7 @@ import os
 from constants import *
 from entities import (Thug, Robot, BrainiacDrone, Metallo, LexGoon, LexMechSuit,
                       Civilian, BuriedCivilian, Animal, Projectile, load_game_sprite,
-                      draw_health_bar)
+                      draw_health_bar, visible_rect, load_sprite_sheet)
 
 _SPRITES_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites")
 
@@ -61,9 +61,92 @@ def _load_fire_frames():
     return _fire_frames
 
 
+# ─── MARKER ART ───────────────────────────────────────────────────────────────
+# Portraits for the off-screen edge markers, so a marker shows the thug, the
+# mech suit or the cat rather than a category-coloured glyph. Loaded lazily and
+# once: convert_alpha needs the display up, and events are built long before the
+# HUD ever asks for one.
+
+_marker_sprites: dict = {}
+
+
+def _sheet_frame(rel_path, frame_count):
+    frames = load_sprite_sheet(rel_path, frame_count, (96, 96))
+    return frames[0] if frames else None
+
+
+def _whole_sprite(rel_path):
+    path = os.path.join(_SPRITES_ROOT, *rel_path.split("/"))
+    return pygame.image.load(path).convert_alpha()
+
+
+def _fire_marker():
+    frames = _load_fire_frames()
+    return frames[0] if frames else None
+
+
+# Anything absent here keeps its hand-drawn _draw_icon: the robot, the Brainiac
+# drone, the rubble field, the crates and the meteor have no sprite to use.
+_MARKER_ART = {
+    EventType.FIGHT_CRIMINALS:    lambda: _sheet_frame("Generic Criminal Goons/Idle_2.png", 11),
+    EventType.FIGHT_LEX_GOONS:    lambda: _whole_sprite("lexcorp/lex_goon.png"),
+    EventType.FIGHT_LEX_MECHSUIT: lambda: _whole_sprite("lexcorp/lex_mechsuit.png"),
+    EventType.FIGHT_METALLO:      lambda: _whole_sprite("Metallo/metallo.png"),
+    EventType.RESCUE_HOSTAGE:     lambda: _whole_sprite("Citizens/Hostage/hostage.png"),
+    EventType.RESCUE_CAR:         lambda: _whole_sprite("Environment/red car.png"),
+    EventType.RESCUE_FALLING:     lambda: _whole_sprite("Citizens/falling citizen.png"),
+    EventType.ANIMAL_CAT:         lambda: _whole_sprite("Animals/brown cat.png"),
+    EventType.ANIMAL_FLOOD:       lambda: _whole_sprite("Animals/brown dog.png"),
+    EventType.RESCUE_FIRE:        _fire_marker,
+}
+
+MARKER_ART_BOX = 28     # fits inside the HUD marker's r=16 disc
+
+
+def get_marker_sprite(event_type):
+    """Portrait for this event type, scaled to fit MARKER_ART_BOX, or None.
+
+    Aspect is preserved rather than squared off with load_game_sprite: the art
+    ranges from a 20x46 car to a 150x158 mech suit, and stretching either to a
+    fixed box is what makes an icon unrecognisable at this size.
+    """
+    if event_type not in _marker_sprites:
+        art = None
+        loader = _MARKER_ART.get(event_type)
+        if loader is not None:
+            try:
+                art = loader()
+            except Exception:
+                art = None          # same degrade-quietly contract as the other loaders
+        if art is not None:
+            # Crop to the art itself first. Sheet frames are square cells with
+            # the character floating in a lot of transparent padding -- the
+            # thug's 96x96 idle cell is mostly empty, and scaling the cell
+            # rather than its contents left him about eight pixels tall.
+            bounds = art.get_bounding_rect()
+            if bounds.w > 0 and bounds.h > 0:
+                art = art.subsurface(bounds).copy()
+            w, h = art.get_size()
+            s = MARKER_ART_BOX / max(w, h)
+            # round, not int: truncation left the long side a pixel under the
+            # box whenever the division landed just short of a whole number.
+            art = pygame.transform.smoothscale(
+                art, (max(1, round(w * s)), max(1, round(h * s))))
+        _marker_sprites[event_type] = art
+    return _marker_sprites[event_type]
+
+
 class BaseEvent:
-    ACTIVATION_RADIUS = 320
+    # Fallback activation range for an event that is somehow near but out of
+    # frame. It stopped being the primary trigger when events began waking on
+    # sight -- see check_activation.
     INNER_RADIUS      = 100
+
+    # Range at which the in-world beacon stops drawing, floored well above
+    # INNER_RADIUS: you have arrived once the event's own contents are around
+    # you, and a fight's enemies spawn out to 160px, so a dot keyed on the
+    # 100px activation range hung about in the middle of the brawl.
+    BEACON_R          = 260
 
     # Assigned by Game._try_spawn_event right after construction, for the one
     # event that needs to aim at real geometry. Not a constructor argument
@@ -84,13 +167,31 @@ class BaseEvent:
         self.failed = False
         self._pulse = 0.0
         self._age = 0.0
+        # Cached in update so draw() can fade the beacon by range without
+        # needing superman passed down to it. Starts far so an event drawn
+        # before its first update still shows one.
+        self._player_dist = float('inf')
         self.score_value = SCORE_TABLE[event_type]
 
     def dist_to(self, superman):
         return math.hypot(superman.x - self.x, superman.y - self.y)
 
     def check_activation(self, superman):
-        if not self.active and self.dist_to(superman) < self.INNER_RADIUS:
+        """Wake on sight, not on proximity.
+
+        Events used to sit inert until you were almost on top of them, which
+        made the world feel staged -- you flew to a marker and only then did
+        anything begin. Coming into view is the natural cue instead: what you
+        can see is happening.
+
+        INNER_RADIUS stays as a fallback for the rare case of being close but
+        out of frame (the camera clamps at the world edges, so it is reachable),
+        and it still sets the range at which the beacon fades.
+        """
+        if self.active:
+            return
+        if (self._player_dist < self.INNER_RADIUS
+                or visible_rect(superman.x, superman.y).collidepoint(self.x, self.y)):
             self.active = True
             self.on_activate(superman)
 
@@ -100,6 +201,7 @@ class BaseEvent:
     def update(self, dt, superman, particles):
         self._pulse += dt * 3.5
         self._age += dt
+        self._player_dist = self.dist_to(superman)
         self.check_activation(superman)
 
     def draw(self, surface, cam):
@@ -108,7 +210,12 @@ class BaseEvent:
         sx = int(self.x - cam.x)
         sy = int(self.y - cam.y)
         color = CAT_COLORS[self.category]
-        if not self.active:
+        # Keyed on range rather than on `active`, which is what it used to be:
+        # now that events wake as soon as they are visible, an `active` test
+        # would mean the beacon never rendered at all. Range keeps the old
+        # behaviour on screen -- a pulsing marker that hands over to the event's
+        # own art as you arrive.
+        if self._player_dist > max(self.BEACON_R, self.INNER_RADIUS):
             r = int(24 + 6 * math.sin(self._pulse))
             gs = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
             alpha = int(100 + 80 * abs(math.sin(self._pulse)))
@@ -117,6 +224,11 @@ class BaseEvent:
             pygame.draw.circle(surface, color, (sx, sy), 16)
             pygame.draw.circle(surface, WHITE, (sx, sy), 16, 2)
             self._draw_icon(surface, sx, sy)
+
+    def marker_sprite(self):
+        """Art for this event's off-screen marker, or None to fall back to
+        _draw_icon. Looked up by type so one table covers every event."""
+        return get_marker_sprite(self.event_type)
 
     def _draw_icon(self, surface, sx, sy):
         pass
@@ -334,7 +446,13 @@ class FireEvent(BaseEvent):
 
 class FallingEvent(BaseEvent):
     INNER_RADIUS = 350
-    FALL_SPEED = 220.0
+    # Slowed from 220 when events began waking on sight. The fall is the only
+    # deadline in the game short enough for that to matter: 340px at 220px/s is
+    # 1.55s, and the far corner of the screen is 734px away against a 550px/s
+    # cruise, so catching someone who appeared at the edge was a coin toss. At
+    # 175 the same drop allows ~1070px of travel and stays winnable without
+    # super speed.
+    FALL_SPEED = 175.0
 
     def __init__(self, x, y):
         super().__init__(x, y, EventType.RESCUE_FALLING)
@@ -437,10 +555,15 @@ class CarEvent(BaseEvent):
         self._traveled = 0.0
         self.car = Car(self.car_x, self.car_y)
         self.enemies = [self.car]
-        # Pedestrians in the path
+        # Pedestrians in the path. Moved further down the road (from 150-300)
+        # when events began waking on sight: the car now pulls away while you
+        # are still up to 734px off, and at 200px/s the old spacing gave 0.6s to
+        # intercept, which no amount of flying covers. At 420-660 the nearest is
+        # ~2s out -- still urgent, and still well inside the 900px the car is
+        # allowed to travel before the event is lost anyway.
         self.pedestrians = [
-            Civilian(x + math.cos(angle) * random.uniform(150, 300) + random.uniform(-30, 30),
-                     y + math.sin(angle) * random.uniform(150, 300) + random.uniform(-30, 30))
+            Civilian(x + math.cos(angle) * random.uniform(420, 660) + random.uniform(-30, 30),
+                     y + math.sin(angle) * random.uniform(420, 660) + random.uniform(-30, 30))
             for _ in range(3)
         ]
 
@@ -544,9 +667,17 @@ class CatEvent(BaseEvent):
         super().__init__(x, y, EventType.ANIMAL_CAT)
         self.cat = Animal(x, y - 40, 'cat')
 
-    def on_activate(self, superman):
-        self.cat.saved = True
-        self.complete = True
+    # The rescue is arrival, and it used to ride on on_activate because
+    # activation *was* arrival -- INNER_RADIUS was 80. Once events began waking
+    # on sight that shortcut handed you the cat from across the street, so the
+    # reach is now its own check.
+    RESCUE_R = 80
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if not self.complete and self._player_dist < self.RESCUE_R:
+            self.cat.saved = True
+            self.complete = True
 
     def draw(self, surface, cam):
         if self.complete:
@@ -1004,28 +1135,25 @@ class Meteor:
 
 
 class MeteorEvent(BaseEvent):
-    # Above INNER_RADIUS, unlike every other event: the base 320 would sit
-    # inside the activation range and the "fly into event area" prompt could
-    # never fire, because the event would already be live before you reached it.
-    ACTIVATION_RADIUS = 560
-    INNER_RADIUS      = 350   # FallingEvent's, for the same reason: a falling
-                              # thing is only a decision if you can see it
+    INNER_RADIUS = 350        # only the beacon's fade range now; the meteor
+                              # wakes as soon as it is on screen
 
-    DESCENT_TIME = 26.0       # seconds of unimpeded fall, alt 1.0 -> 0.0. Under
-                              # ~20 it stops being reactable; over ~35 the last
-                              # third is dead air.
+    DESCENT_TIME = 19.5       # 390px of fall at 20px/s -- double the old
+                              # descent rate over 1.5x the distance, so it
+                              # closes noticeably faster than it used to while
+                              # still leaving room for either kill.
     FROZEN_MUL   = 0.25       # the same slow Enemy._move_toward applies. Never
                               # 0: freeze has to buy time, not stall the event
                               # forever, and alt must stay monotonic so this
                               # always terminates once the player lets go.
-    ALTITUDE_PX  = 260        # screen offset above the target at alt = 1. Near
-                              # FallingEvent's 280 on purpose: the event
-                              # activates at 350px, so anything much taller
-                              # puts the rock off the top of the screen for the
-                              # early descent and you only ever see its reticle.
-    ENTRY_DX     = 200        # lateral offset at alt = 1; sign randomised, so
-                              # it comes in on a slant instead of dropping
-    R_HIGH, R_LOW = 15, 46    # drawn radius at alt 1 and at impact
+    ALTITUDE_PX  = 390        # screen offset above the target at alt = 1
+    ENTRY_DX     = 300        # lateral offset at alt = 1; sign randomised, so
+                              # it comes in on a slant instead of dropping.
+                              # Scaled with ALTITUDE_PX so the approach keeps
+                              # the same angle, just a longer run at it.
+    R_HIGH, R_LOW = 60, 184   # drawn radius at alt 1 and at impact. Big enough
+                              # that the shadow, reticle and bars below are all
+                              # sized off R_LOW rather than fixed pixels.
     HEAT_RATE    = 1 / 6.0    # 6s of held, on-target beam to overload
     HEAT_DECAY   = 0.05       # 20s to cool from full. Crate.char never decays
                               # because it is a warning; this is a win
@@ -1056,6 +1184,8 @@ class MeteorEvent(BaseEvent):
         self._hit_building = False
         self._trail_t = 0.0
         self._resolved = False
+        self._aura_key = None     # see _draw_rock
+        self._aura = None
         # Fixed crater offsets in unit-radius space, generated once so the
         # surface detail doesn't crawl the way random() in a draw path always
         # does.
@@ -1236,7 +1366,7 @@ class MeteorEvent(BaseEvent):
 
         # Ground shadow. This is the cue that makes the vertical offset read as
         # altitude rather than as distance north; without it the illusion fails.
-        sw = int(18 + 58 * prog)
+        sw = int(self.R_LOW * (0.34 + 0.66 * prog))
         sh = max(3, int(sw * 0.42))
         shadow = pygame.Surface((sw * 2, sh * 2), pygame.SRCALPHA)
         # Opaque enough to read against the darker building colours, which most
@@ -1245,8 +1375,10 @@ class MeteorEvent(BaseEvent):
         pygame.draw.ellipse(shadow, (0, 0, 0, int(70 + 150 * prog)), shadow.get_rect())
         surface.blit(shadow, (tsx - sw, tsy - sh))
 
-        # Contracting reticle, for time pressure
-        ring = max(6, int(100 - 70 * prog + 7 * math.sin(self._pulse * 2)))
+        # Contracting reticle, for time pressure. Sized off R_LOW so it always
+        # frames the footprint the rock will actually cover, rather than a fixed
+        # radius the rock long ago outgrew.
+        ring = int(self.R_LOW * (1.9 - 0.85 * prog) + 7 * math.sin(self._pulse * 2))
         col = RED if prog > 0.66 else (ORANGE if prog > 0.33 else GOLD)
         pygame.draw.circle(surface, col, (tsx, tsy), ring, 2)
         for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
@@ -1265,28 +1397,43 @@ class MeteorEvent(BaseEvent):
 
         self._draw_rock(surface, msx, msy, r)
 
-        draw_health_bar(surface, msx, msy - r - 22, self.core.hp, Meteor.HP, width=64)
+        bw = 140                                  # widened to suit the rock
+        draw_health_bar(surface, msx, msy - r - 26, self.core.hp, Meteor.HP, width=bw)
         # Not draw_health_bar: its green->gold->red ramp runs the wrong way for
         # a meter that is dangerous when full.
-        pygame.draw.rect(surface, (38, 12, 0), (msx - 32, msy - r - 13, 64, 5))
+        pygame.draw.rect(surface, (38, 12, 0), (msx - bw // 2, msy - r - 16, bw, 6))
         if self.heat > 0:
             hc = (_lerp_col(FIRE_WARM, FIRE_HOT, self.heat * 2) if self.heat < 0.5
                   else _lerp_col(FIRE_HOT, WHITE, (self.heat - 0.5) * 2))
-            pygame.draw.rect(surface, hc, (msx - 32, msy - r - 13, int(64 * self.heat), 5))
+            pygame.draw.rect(surface, hc,
+                             (msx - bw // 2, msy - r - 16, int(bw * self.heat), 6))
 
-        # Descent bar, on the ground, in the standard event timer idiom
+        # Descent bar, on the ground, in the standard event timer idiom. Pushed
+        # clear of the reticle rather than sitting at a fixed +40, which the
+        # rock now swallows whole.
+        by = tsy + int(self.R_LOW * 1.35)
         bc = GREEN if self.alt > 0.5 else (GOLD if self.alt > 0.25 else RED)
-        pygame.draw.rect(surface, (40, 20, 0), (tsx - 40, tsy + 40, 80, 8))
-        pygame.draw.rect(surface, bc, (tsx - 40, tsy + 40, int(80 * self.alt), 8))
+        pygame.draw.rect(surface, (40, 20, 0), (tsx - 40, by, 80, 8))
+        pygame.draw.rect(surface, bc, (tsx - 40, by, int(80 * self.alt), 8))
 
     def _draw_rock(self, surface, msx, msy, r):
-        # Heat aura: the Crate.char glow idiom in circular form.
+        # Heat aura: the Crate.char glow idiom in circular form, but cached.
+        # At R_LOW it spans ~830px, and building that from two alpha circles
+        # every frame is the one thing in this event that genuinely costs
+        # frames in wasm. Radius is quantised to 8px and heat to 10 steps, so
+        # the pulse and the descent both reuse a surface for many frames at a
+        # time and it is only rebuilt when it would visibly differ.
         ar = int(r * (1.85 + 0.40 * self.heat) + 3 * math.sin(self._pulse * 2))
-        aura = pygame.Surface((ar * 2, ar * 2), pygame.SRCALPHA)
-        pygame.draw.circle(aura, (*FIRE_HOT, int(34 + 96 * self.heat)), (ar, ar), ar)
-        pygame.draw.circle(aura, (*FIRE_WARM, int(48 + 112 * self.heat)),
-                           (ar, ar), int(ar * 0.64))
-        surface.blit(aura, (msx - ar, msy - ar))
+        key = (ar // 8, int(self.heat * 10))
+        if key != self._aura_key:
+            self._aura_key = key
+            aura = pygame.Surface((ar * 2, ar * 2), pygame.SRCALPHA)
+            pygame.draw.circle(aura, (*FIRE_HOT, int(34 + 96 * self.heat)), (ar, ar), ar)
+            pygame.draw.circle(aura, (*FIRE_WARM, int(48 + 112 * self.heat)),
+                               (ar, ar), int(ar * 0.64))
+            self._aura = aura
+        a = self._aura
+        surface.blit(a, (msx - a.get_width() // 2, msy - a.get_height() // 2))
 
         # Red for most of the climb, only going pale in the last third. Ramping
         # to white by halfway made it read as bleached rather than glowing,

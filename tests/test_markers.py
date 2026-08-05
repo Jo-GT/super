@@ -106,3 +106,47 @@ def test_rot_pt_needs_no_negation():
         ux, uy = _unit(dx, dy)
         assert x == pytest.approx(ux * 10, abs=1e-9)
         assert y == pytest.approx(uy * 10, abs=1e-9)
+
+
+# ─── marker art ───────────────────────────────────────────────────────────────
+
+def test_marker_art_is_the_event_s_own_sprite_where_one_exists():
+    """A marker should say "thug" or "mech suit", not just "combat"."""
+    import pygame
+
+    from constants import EventType
+    from events import MARKER_ART_BOX, EVENT_FACTORIES, get_marker_sprite
+
+    pygame.display.set_mode((320, 240))          # convert_alpha needs a display
+    want_sprite = {
+        EventType.FIGHT_CRIMINALS, EventType.FIGHT_LEX_GOONS,
+        EventType.FIGHT_LEX_MECHSUIT, EventType.FIGHT_METALLO,
+        EventType.RESCUE_HOSTAGE, EventType.RESCUE_CAR,
+        EventType.RESCUE_FALLING, EventType.ANIMAL_CAT,
+        EventType.ANIMAL_FLOOD, EventType.RESCUE_FIRE,
+    }
+    for etype in want_sprite:
+        art = get_marker_sprite(etype)
+        assert art is not None, f"{etype.name} lost its marker sprite"
+        w, h = art.get_size()
+        assert max(w, h) == MARKER_ART_BOX, "should fill the box on its long side"
+        assert min(w, h) > 1
+        # Cropped to the art: a sheet cell that kept its transparent padding
+        # would leave the subject a handful of pixels tall.
+        assert art.get_bounding_rect().h > h * 0.7
+
+    # The rest have no sprite and must fall back to _draw_icon, not crash.
+    for etype in set(EventType) - want_sprite:
+        assert get_marker_sprite(etype) is None
+
+
+def test_every_event_can_be_asked_for_marker_art():
+    import pygame
+
+    from constants import EventType
+    from events import EVENT_FACTORIES
+
+    pygame.display.set_mode((320, 240))
+    for etype, factory in EVENT_FACTORIES.items():
+        ev = factory(100, 100)
+        ev.marker_sprite()          # must not raise for any event
