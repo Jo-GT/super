@@ -57,6 +57,16 @@ class ParticleSystem:
             self.add(Particle(x, y, math.cos(angle) * spd, math.sin(angle) * spd,
                                color, random.uniform(life * 0.5, life), size, gravity=gravity))
 
+    def ricochet(self, x, y, angle, count=2):
+        """Spent bullets deflecting off something bulletproof: they kick off
+        roughly back the way they came, then gravity takes over and drops
+        them, unlike the spark burst which just fades in place."""
+        for _ in range(count):
+            a = angle + math.pi + random.uniform(-0.7, 0.7)
+            spd = random.uniform(2.5, 4.5)
+            self.add(Particle(x, y, math.cos(a) * spd, math.sin(a) * spd,
+                               (196, 168, 74), random.uniform(0.5, 0.8), 2, gravity=0.35))
+
     def trail(self, x, y, color, angle, spread=0.4, count=3, speed=1.5, life=0.25, size=3):
         back = angle + math.pi
         for _ in range(count):

@@ -754,6 +754,7 @@ class Thug(Enemy):
                     audio.snd_ricochet.play()
                 particles.burst(superman.x, superman.y, SILVER, 6, 4, size=3, life=0.3)
                 particles.burst(superman.x, superman.y, (255, 210, 120), 5, 2)
+                particles.ricochet(superman.x, superman.y, proj.angle)
                 proj.dead = True
         self.projectiles = [p for p in self.projectiles if not p.dead]
 
