@@ -19,9 +19,18 @@ SOUNDS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Sounds")
 # before it calls pygame.init(). So the mixer has to be brought up here: without
 # it every Sound() raises, load_sound hands back None, and the whole game runs
 # silently with nothing logged. Guarded because pygame.init() will call it again.
+#
+# buffer is explicit because SDL2's default (512 samples, ~12ms at 44100Hz) is
+# sized for a native audio thread with real OS scheduling. pygbag's web build
+# has no such thread -- audio, rendering and Python all take turns on the
+# browser's single main thread -- so a frame running a touch long starves the
+# mixer and the underrun pops as a click. Native playback has enough margin
+# that this never mattered there; on the web build it's audible, especially on
+# the streamed mixer.music track. A bigger buffer trades a little latency
+# (~46ms at 2048) for headroom against that jitter.
 if not pygame.mixer.get_init():
     try:
-        pygame.mixer.init()
+        pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=2048)
     except pygame.error:
         pass
 
