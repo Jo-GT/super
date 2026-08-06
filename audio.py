@@ -44,6 +44,7 @@ snd_xray      = load_sound("xrayvision.ogg")
 snd_gameover  = load_sound("GameOver.ogg")
 snd_gunshot   = load_sound("gunshot.ogg")
 snd_reload    = load_sound("gun reload.ogg")
+snd_ricochet  = load_sound("bullet ricochet.ogg")
 
 # Heat vision is held down, so its sound has to sustain for as long as the
 # player likes. The original heatvision.ogg is a self-contained 4s one-shot —

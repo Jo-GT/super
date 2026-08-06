@@ -638,7 +638,9 @@ class Enemy:
 class Thug(Enemy):
     """Gun-toting street criminal: closes in to shooting range, then holds
     position alternating idle/shoot until its clip is spent, reloads, repeats."""
-    HP = 35; SPEED = 1.8; DMG = 4.0; COLOR = (80, 80, 80); RADIUS = 14
+    # Bulletproof: regular gunfire just ricochets off Superman (see the hit
+    # handling in update() below), so ordinary thug/goon bullets do 0 damage.
+    HP = 35; SPEED = 1.8; DMG = 0; COLOR = (80, 80, 80); RADIUS = 14
 
     # LexGoon reskins this class and turns it off; the Lex-employed goons stay
     # silent while the generic street thugs get gunshot/reload clips.
@@ -748,6 +750,9 @@ class Thug(Enemy):
             proj.update(dt)
             if proj.hits_superman(superman):
                 superman.take_damage(self.DMG)
+                if audio.snd_ricochet:
+                    audio.snd_ricochet.play()
+                particles.burst(superman.x, superman.y, SILVER, 6, 4, size=3, life=0.3)
                 particles.burst(superman.x, superman.y, (255, 210, 120), 5, 2)
                 proj.dead = True
         self.projectiles = [p for p in self.projectiles if not p.dead]
