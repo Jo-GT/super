@@ -3,6 +3,7 @@ import math
 import random
 import os
 from constants import *
+import audio
 
 _SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites", "superman")
 _LEXCORP_SPRITES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sprites", "lexcorp")
@@ -639,6 +640,10 @@ class Thug(Enemy):
     position alternating idle/shoot until its clip is spent, reloads, repeats."""
     HP = 35; SPEED = 1.8; DMG = 4.0; COLOR = (80, 80, 80); RADIUS = 14
 
+    # LexGoon reskins this class and turns it off; the Lex-employed goons stay
+    # silent while the generic street thugs get gunshot/reload clips.
+    GUN_SOUNDS = True
+
     STOP_RANGE    = 260   # stands and shoots once this close instead of closing in
     SHOT_SPEED    = 5.5
     SHOT_INTERVAL = 2.2
@@ -709,6 +714,8 @@ class Thug(Enemy):
         if self.reload_t > 0:
             if self._anim_state != 'reload':
                 self._set_anim('reload')
+                if self.GUN_SOUNDS and audio.snd_reload:
+                    audio.snd_reload.play()
             self.reload_t = max(0.0, self.reload_t - dt)
             self._tick_anim(dt, self.RELOAD_FPS, loop=False)
             if self.reload_t <= 0:
@@ -722,6 +729,8 @@ class Thug(Enemy):
             self.shot_cd = self.SHOT_INTERVAL
             self.shots_fired += 1
             self._set_anim('shot')
+            if self.GUN_SOUNDS and audio.snd_gunshot:
+                audio.snd_gunshot.play()
             self.projectiles.append(
                 Projectile(self.x, self.y, self._angle, self.SHOT_SPEED, (255, 210, 120), 3, 1.6, shape='bullet'))
             particles.burst(self.x + math.cos(self._angle) * 22, self.y + math.sin(self._angle) * 22,
@@ -774,6 +783,7 @@ class Thug(Enemy):
 class LexGoon(Thug):
     """Thug reskinned with the LexCorp goon sprite; stats/AI unchanged from
     Thug, falls back to Thug's procedural look if the sprite fails to load."""
+    GUN_SOUNDS = False
     _SPRITE_SIZE = (40, 75)
     _sprite = None
 

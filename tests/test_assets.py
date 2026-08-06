@@ -26,6 +26,8 @@ REQUIRED_SOUNDS = [
     "snd_punch",
     "snd_xray",
     "snd_gameover",
+    "snd_gunshot",
+    "snd_reload",
     "snd_heat_intro",
     "snd_heat_loop",
     "snd_heat_tail",
