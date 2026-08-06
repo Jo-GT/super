@@ -541,9 +541,9 @@ class Superman:
         if self.heat_firing:
             ex = int(self.head_pos[0] - cam.x)
             ey = int(self.head_pos[1] - cam.y)
-            gs = pygame.Surface((32, 32), pygame.SRCALPHA)
-            pygame.draw.circle(gs, (*FIRE_HOT, 200), (16, 16), 14)
-            surface.blit(gs, (ex - 16, ey - 16))
+            gs = pygame.Surface((16, 16), pygame.SRCALPHA)
+            pygame.draw.circle(gs, (*FIRE_HOT, 200), (8, 8), 6)
+            surface.blit(gs, (ex - 8, ey - 8))
 
         # Krypto aura
         if self.krypto_debuff > 0:
