@@ -172,6 +172,15 @@ REPUTATION_TABLE = {
     EventType.CIVIC_PLAYGROUND: 18,
 }
 
+# Relative spawn weight, looked up by spawn_random_event. Anything absent
+# defaults to 1. Civic events are doubled: at an even 1-in-17 share they were
+# going long stretches without showing up at all, which defeats the point of
+# a deliberate downtime beat between fights.
+EVENT_SPAWN_WEIGHT = {
+    EventType.CIVIC_PHOTO_OP:   2.0,
+    EventType.CIVIC_PLAYGROUND: 2.0,
+}
+
 LEX_EVENT_TYPES = {
     EventType.FIGHT_ROBOTS,
     EventType.FIGHT_LEX_GOONS,

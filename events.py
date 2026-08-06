@@ -1700,6 +1700,7 @@ def spawn_random_event(x, y, exclude_types=None):
     choices = list(EventType)
     if exclude_types:
         choices = [t for t in choices if t not in exclude_types]
-    etype = random.choice(choices)
+    weights = [EVENT_SPAWN_WEIGHT.get(t, 1.0) for t in choices]
+    etype = random.choices(choices, weights=weights, k=1)[0]
     factory = EVENT_FACTORIES[etype]
     return factory(x, y)
