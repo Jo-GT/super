@@ -844,7 +844,7 @@ class Robot(Enemy):
         d = math.hypot(dx, dy)
         if d > target_d + 30:
             self._move_toward(superman.x, superman.y, dt, spd_m)
-        elif d < target_d - 30:
+        elif d < target_d - 30 and d > 0:
             self.x -= dx / d * self.SPEED * spd_m
             self.y -= dy / d * self.SPEED * spd_m
         else:
