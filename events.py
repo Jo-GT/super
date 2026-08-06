@@ -176,6 +176,7 @@ class BaseEvent:
         # up again behind you, in the middle of a fight you are already in.
         self._arrived = False
         self.score_value = SCORE_TABLE[event_type]
+        self.rep_value = REPUTATION_TABLE.get(event_type, 8)
 
     def dist_to(self, superman):
         return math.hypot(superman.x - self.x, superman.y - self.y)
@@ -1557,6 +1558,121 @@ class MeteorEvent(BaseEvent):
         pygame.draw.line(surface, FIRE_HOT,  (sx - 6,  sy - 12), (sx - 1, sy - 6), 2)
 
 
+# ─── CIVIC EVENTS ─────────────────────────────────────────────────────────────
+# Goodwill beats between fights: no enemies, no timer running out, no way to
+# fail. score_value is 0 (set via SCORE_TABLE) so these never inflate combat
+# score -- rep_value is where they pay out instead. Both just want you to hold
+# still nearby for a few seconds, so they share that shape rather than each
+# reimplementing a hold timer.
+
+class CivicPhotoEvent(BaseEvent):
+    INNER_RADIUS = 200
+    POSE_R    = 90
+    POSE_TIME = 3.0
+
+    def __init__(self, x, y):
+        super().__init__(x, y, EventType.CIVIC_PHOTO_OP)
+        self.pose_t = 0.0
+        self.crowd = [(random.uniform(-50, 50), random.uniform(-24, 30))
+                      for _ in range(6)]
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if not self.active or self.complete:
+            return
+        if self._player_dist < self.POSE_R:
+            self.pose_t += dt
+            if self.pose_t >= self.POSE_TIME:
+                self.complete = True
+                particles.burst(self.x, self.y - 20, WHITE, count=20, speed=3, size=3, life=0.4)
+
+    def get_ui_text(self):
+        pct = int(min(1.0, self.pose_t / self.POSE_TIME) * 100)
+        return self.name, f"Hold position near the crowd  -  posing {pct}%"
+
+    def draw(self, surface, cam):
+        if self.complete:
+            return
+        sx = int(self.x - cam.x)
+        sy = int(self.y - cam.y)
+        for ox, oy in self.crowd:
+            cx, cy = sx + int(ox), sy + int(oy)
+            pygame.draw.circle(surface, FLESH, (cx, cy - 10), 6)
+            pygame.draw.circle(surface, BLACK, (cx, cy - 10), 6, 1)
+            pygame.draw.line(surface, (60, 90, 160), (cx - 6, cy - 2), (cx + 6, cy - 2), 5)
+        if self.active and self.pose_t > 0:
+            ratio = min(1.0, self.pose_t / self.POSE_TIME)
+            pygame.draw.rect(surface, (40, 30, 0), (sx - 40, sy - 70, 80, 8))
+            pygame.draw.rect(surface, GOLD, (sx - 40, sy - 70, int(80 * ratio), 8))
+        super().draw(surface, cam)
+
+    def _draw_icon(self, surface, sx, sy):
+        pygame.draw.rect(surface, BLACK, (sx - 9, sy - 5, 18, 12), border_radius=2)
+        pygame.draw.circle(surface, LGRAY, (sx, sy + 1), 5)
+        pygame.draw.circle(surface, CAT_COLORS['civic'], (sx, sy + 1), 5, 2)
+        pygame.draw.rect(surface, BLACK, (sx + 3, sy - 8, 5, 3))
+
+
+class CivicPlaygroundEvent(BaseEvent):
+    INNER_RADIUS = 220
+    BUILD_R    = 100
+    BUILD_TIME = 5.0
+
+    # (ox, oy, w, h) offsets for the slide frame and swing posts, revealed in
+    # order as build_t advances so the site visibly goes up while you wait.
+    PIECES = [
+        (-70, 10, 10, 46),
+        (-70, 10, 46, 10),
+        (40, -10, 10, 66),
+        (66, -10, 10, 66),
+        (40, -10, 36, 8),
+    ]
+
+    def __init__(self, x, y):
+        super().__init__(x, y, EventType.CIVIC_PLAYGROUND)
+        self.build_t = 0.0
+        self.workers = [(random.uniform(-40, 90), random.uniform(20, 40))
+                        for _ in range(3)]
+
+    def update(self, dt, superman, particles):
+        super().update(dt, superman, particles)
+        if not self.active or self.complete:
+            return
+        if self._player_dist < self.BUILD_R:
+            self.build_t += dt
+            if self.build_t >= self.BUILD_TIME:
+                self.complete = True
+                particles.burst(self.x, self.y - 20, GOLD, count=24, speed=3.2, size=4, life=0.5)
+
+    def get_ui_text(self):
+        pct = int(min(1.0, self.build_t / self.BUILD_TIME) * 100)
+        return self.name, f"Stay close and keep building  -  {pct}% done"
+
+    def draw(self, surface, cam):
+        if self.complete:
+            return
+        sx = int(self.x - cam.x)
+        sy = int(self.y - cam.y)
+        ratio = min(1.0, self.build_t / self.BUILD_TIME)
+        done = int(len(self.PIECES) * ratio)
+        for ox, oy, w, h in self.PIECES[:done]:
+            pygame.draw.rect(surface, (230, 140, 40),
+                              (sx + ox - w // 2, sy + oy - h // 2, w, h), border_radius=3)
+        for wx, wy in self.workers:
+            cx, cy = sx + int(wx), sy + int(wy)
+            pygame.draw.circle(surface, FLESH, (cx, cy - 10), 6)
+            pygame.draw.circle(surface, BLACK, (cx, cy - 10), 6, 1)
+            pygame.draw.line(surface, (220, 180, 20), (cx - 6, cy - 2), (cx + 6, cy - 2), 5)
+        if self.active and self.build_t > 0:
+            pygame.draw.rect(surface, (40, 30, 0), (sx - 40, sy - 90, 80, 8))
+            pygame.draw.rect(surface, GOLD, (sx - 40, sy - 90, int(80 * ratio), 8))
+        super().draw(surface, cam)
+
+    def _draw_icon(self, surface, sx, sy):
+        pygame.draw.line(surface, (140, 90, 40), (sx - 6, sy + 8), (sx + 6, sy - 6), 3)
+        pygame.draw.rect(surface, GRAY, (sx + 2, sy - 12, 10, 7), border_radius=1)
+
+
 # ─── FACTORY ──────────────────────────────────────────────────────────────────
 
 EVENT_FACTORIES = {
@@ -1575,6 +1691,8 @@ EVENT_FACTORIES = {
     EventType.RESCUE_RUBBLE:   RubbleEvent,
     EventType.FIGHT_LEX_CRATES: CrateEvent,
     EventType.FIGHT_METEOR:     MeteorEvent,
+    EventType.CIVIC_PHOTO_OP:   CivicPhotoEvent,
+    EventType.CIVIC_PLAYGROUND: CivicPlaygroundEvent,
 }
 
 

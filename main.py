@@ -303,9 +303,14 @@ class Game:
                     self.dialogue.trigger('metallo', METALLO_INTRO_LINES[ev.event_type], SUPERMAN_VS_METALLO_INTRO_LINES[ev.event_type])
             if ev.complete and not hasattr(ev, '_rewarded'):
                 ev._rewarded = True
-                s.score += ev.score_value
-                s.reputation = min(100, s.reputation + 8)
-                self.notify(f"+{ev.score_value}  {ev.name}", GOLD)
+                s.reputation = min(100, s.reputation + ev.rep_value)
+                if ev.score_value:
+                    s.score += ev.score_value
+                    self.notify(f"+{ev.score_value}  {ev.name}", GOLD)
+                else:
+                    # Civic events: no combat score, so the notification calls
+                    # out the reputation gain instead.
+                    self.notify(f"+{ev.rep_value} REP  {ev.name}", CAT_COLORS['civic'])
                 self.flash.trigger(YELLOW_S, 80)
                 if ev.event_type in LEX_EVENT_TYPES:
                     self.dialogue.trigger('lex', LEX_DEFEAT_LINES[ev.event_type], SUPERMAN_DEFEAT_LINES[ev.event_type])

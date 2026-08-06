@@ -69,6 +69,8 @@ class EventType(Enum):
     RESCUE_RUBBLE      = auto()
     FIGHT_LEX_CRATES   = auto()
     FIGHT_METEOR       = auto()
+    CIVIC_PHOTO_OP     = auto()
+    CIVIC_PLAYGROUND   = auto()
 
 EVENT_CAT = {
     EventType.FIGHT_CRIMINALS: 'fight',
@@ -86,6 +88,8 @@ EVENT_CAT = {
     EventType.RESCUE_RUBBLE:      'rescue',
     EventType.FIGHT_LEX_CRATES:   'fight',
     EventType.FIGHT_METEOR:       'fight',
+    EventType.CIVIC_PHOTO_OP:     'civic',
+    EventType.CIVIC_PLAYGROUND:   'civic',
 }
 
 EVENT_NAMES = {
@@ -104,6 +108,8 @@ EVENT_NAMES = {
     EventType.RESCUE_RUBBLE:      "Collapsed Building!",
     EventType.FIGHT_LEX_CRATES:   "LexCorp Decoy Crates",
     EventType.FIGHT_METEOR:       "!! METEOR INBOUND !!",
+    EventType.CIVIC_PHOTO_OP:     "Fans Want a Photo!",
+    EventType.CIVIC_PLAYGROUND:   "Playground Build Day",
 }
 
 EVENT_HINTS = {
@@ -122,12 +128,15 @@ EVENT_HINTS = {
     EventType.RESCUE_RUBBLE:      "X=X-Ray Vision to find the buried, then fly to each survivor!",
     EventType.FIGHT_LEX_CRATES:   "X=X-Ray to scan, then Q=Punch the bomb. Heat vision cuts straight through!",
     EventType.FIGHT_METEOR:       "Q=Punch to crack it  -  SPACE=Heat Vision to overload it  -  F=Freeze slows the fall",
+    EventType.CIVIC_PHOTO_OP:     "Hold position near the crowd to pose for photos!",
+    EventType.CIVIC_PLAYGROUND:   "Fly in and help hammer the playground together!",
 }
 
 CAT_COLORS = {
     'fight':  (218, 38,  38),
     'rescue': (252, 152, 0),
     'animal': (48,  198, 78),
+    'civic':  (0,   158, 158),
 }
 
 SCORE_TABLE = {
@@ -146,6 +155,21 @@ SCORE_TABLE = {
     EventType.RESCUE_RUBBLE:      1100,
     EventType.FIGHT_LEX_CRATES:   1400,
     EventType.FIGHT_METEOR:       2000,
+    # Civic events pay no combat score at all -- they feed REPUTATION_TABLE
+    # below instead, kept at 0 here only because test_every_event_type_is_
+    # fully_registered requires every EventType to have a SCORE_TABLE entry.
+    EventType.CIVIC_PHOTO_OP:     0,
+    EventType.CIVIC_PLAYGROUND:   0,
+}
+
+# Reputation payout on completion, looked up by BaseEvent.__init__. Anything
+# absent (every combat/rescue/animal event) falls back to the flat +8 that
+# used to be hardcoded in main.py's reward block. Civic events set their own,
+# larger share here since score_value is 0 for them above -- reputation is
+# the entire point of a goodwill event, not a consolation prize.
+REPUTATION_TABLE = {
+    EventType.CIVIC_PHOTO_OP:   12,
+    EventType.CIVIC_PLAYGROUND: 18,
 }
 
 LEX_EVENT_TYPES = {
